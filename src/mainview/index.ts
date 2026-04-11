@@ -74,6 +74,38 @@ function escapeHtml(text: string): string {
 }
 
 /**
+ * Mermaid エラー表示用の罫線ボックステキストを生成する。
+ */
+function buildErrorBoxText(
+  index: number,
+  message: string,
+  code: string
+): string {
+  const headerText = `Mermaid Error (diagram #${index + 1})`;
+  const contentLines: string[] = [message];
+
+  if (code.length > 0) {
+    contentLines.push("Source:");
+    const codeLines = code.split("\n").slice(0, 3);
+    for (const line of codeLines) {
+      contentLines.push(`  ${line}`);
+    }
+  }
+
+  const allLines = [headerText, ...contentLines];
+  const maxContentWidth = Math.max(...allLines.map((l) => l.length));
+  const innerWidth = maxContentWidth + 2;
+
+  const top = `┌─ ${headerText} ${"─".repeat(Math.max(0, innerWidth - headerText.length - 2))}─┐`;
+  const bottom = `└─${"─".repeat(innerWidth)}─┘`;
+  const body = contentLines
+    .map((l) => `│ ${l.padEnd(innerWidth)} │`)
+    .join("\n");
+
+  return `${top}\n${body}\n${bottom}`;
+}
+
+/**
  * Markdown テキストを DOM に描画する。
  * メインプロセスから window.__MADO_RENDER__(text) として呼ばれる。
  *
@@ -103,17 +135,50 @@ async function render(markdownText: string): Promise<void> {
   // DOM に挿入
   contentEl.innerHTML = html;
 
-  // Mermaid ダイアグラムを SVG に変換
-  try {
-    await mermaid.run({
-      nodes: contentEl.querySelectorAll<HTMLElement>(".mermaid"),
-    });
-  } catch (err) {
-    console.error("[mado] mermaid render error:", err);
-    // Mermaid エラーをメインプロセスに通知（window イベント経由）
-    window.dispatchEvent(
-      new CustomEvent("mado:mermaid-error", { detail: { message: String(err) } })
-    );
+  // Mermaid ダイアグラムを個別に検証し、エラーがあればインライン表示する
+  const mermaidNodes = contentEl.querySelectorAll<HTMLElement>(".mermaid");
+  const validNodes: HTMLElement[] = [];
+  const errors: Array<{ index: number; message: string; code: string }> = [];
+
+  for (let i = 0; i < mermaidNodes.length; i++) {
+    const node = mermaidNodes[i];
+    const code = node.textContent ?? "";
+
+    try {
+      await mermaid.parse(code);
+      validNodes.push(node);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push({ index: i, message, code });
+
+      // エラー表示用の DOM に置き換え
+      const errorPre = document.createElement("pre");
+      errorPre.className = "mermaid-error";
+      errorPre.textContent = buildErrorBoxText(i, message, code);
+      node.replaceWith(errorPre);
+
+      console.error(`[mado] mermaid parse error in diagram #${i + 1}:`, message);
+    }
+  }
+
+  // parse に成功したノードのみ mermaid.run() に渡す
+  if (validNodes.length > 0) {
+    try {
+      await mermaid.run({ nodes: validNodes });
+    } catch (err) {
+      console.error("[mado] mermaid render error:", err);
+    }
+  }
+
+  // エラー情報をメインプロセスに通知
+  if (errors.length > 0 && "__electrobunSendToHost" in window) {
+    const sendToHost = window.__electrobunSendToHost;
+    if (typeof sendToHost === "function") {
+      sendToHost({
+        type: "mermaid-errors",
+        errors,
+      });
+    }
   }
 }
 
@@ -123,6 +188,8 @@ async function render(markdownText: string): Promise<void> {
 declare global {
   interface Window {
     __MADO_RENDER__: (markdownText: string) => void;
+    /** Electrobun のプリロードが提供する host-message 送信関数 */
+    __electrobunSendToHost?: (data: unknown) => void;
   }
 }
 

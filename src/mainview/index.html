@@ -41,6 +41,29 @@
       margin: 1em 0;
     }
 
+    /* Mermaid パースエラーのインライン表示 */
+    .mermaid-error {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 6px;
+      padding: 16px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      color: #856404;
+      white-space: pre;
+      overflow-x: auto;
+      margin: 1em 0;
+      line-height: 1.5;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .mermaid-error {
+        background: #332701;
+        border-color: #664d00;
+        color: #ffc107;
+      }
+    }
+
     /* ローディング中インジケーター */
     #loading {
       display: flex;

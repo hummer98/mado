@@ -15,6 +15,8 @@ import { getSocketPath } from "../lib/socket-path";
 import { sendFileToExistingProcess } from "../lib/ipc-client";
 import { startIpcServer, stopIpcServer } from "../lib/ipc-server";
 import { initLogger, log } from "../lib/logger";
+import { formatMermaidError } from "../lib/mermaid-error";
+import type { MermaidErrorInfo } from "../lib/mermaid-error";
 
 /**
  * Markdown ファイルを読み込む。失敗時はフォールバックコンテンツを返す。
@@ -28,6 +30,55 @@ function loadMarkdownFile(filePath: string): string {
     log("error", { message: `ファイル読み込み失敗: ${String(err)}`, path: filePath });
     console.error(`[mado] ファイルを開けませんでした: ${filePath}`);
     return `# mado\n\nファイルを開けませんでした: \`${filePath}\`\n`;
+  }
+}
+
+/**
+ * host-message イベントから Mermaid エラー情報を処理する。
+ * WebView 側の __electrobunSendToHost() から送信されたデータを受信する。
+ */
+function handleMermaidErrorEvent(event: unknown): void {
+  try {
+    // イベントデータの構造を検証
+    if (
+      typeof event !== "object" ||
+      event === null ||
+      !("data" in event) ||
+      typeof (event as Record<string, unknown>).data !== "object"
+    ) {
+      return;
+    }
+
+    const data = (event as Record<string, unknown>).data as Record<string, unknown>;
+
+    // Mermaid エラーイベントかどうか確認
+    if (data.type !== "mermaid-errors" || !Array.isArray(data.errors)) {
+      return;
+    }
+
+    for (const error of data.errors) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        typeof (error as Record<string, unknown>).index === "number" &&
+        typeof (error as Record<string, unknown>).message === "string"
+      ) {
+        const errorInfo: MermaidErrorInfo = {
+          index: (error as Record<string, unknown>).index as number,
+          message: (error as Record<string, unknown>).message as string,
+          code: typeof (error as Record<string, unknown>).code === "string"
+            ? (error as Record<string, unknown>).code as string
+            : "",
+        };
+        console.log(formatMermaidError(errorInfo));
+        log("mermaid_error", {
+          diagram: errorInfo.index + 1,
+          message: errorInfo.message,
+        });
+      }
+    }
+  } catch (err) {
+    log("error", { message: `mermaid error event handling failed: ${String(err)}` });
   }
 }
 
@@ -87,7 +138,14 @@ async function main(): Promise<void> {
     log("webview_state_changed", { state: "did-navigate" });
   });
 
-  // 8. IPC サーバー起動（2回目以降の起動からファイルパスを受信）
+  // 8. Mermaid エラー通知の受信（host-message イベント）
+  // 注意: "host-message" は BrowserView.on() の型定義に含まれないため、
+  // BrowserWindow.on() を使用する（string 型を受け付ける）
+  win.on("host-message", (event: unknown) => {
+    handleMermaidErrorEvent(event);
+  });
+
+  // 9. IPC サーバー起動（2回目以降の起動からファイルパスを受信）
   const ipcServer = startIpcServer(socketPath, (newFilePath) => {
     try {
       const newContent = readFileSync(newFilePath, "utf-8");
@@ -114,7 +172,7 @@ async function main(): Promise<void> {
     }
   });
 
-  // 9. 終了処理
+  // 10. 終了処理
   process.on("beforeExit", () => {
     stopIpcServer(ipcServer, socketPath);
     log("file_closed", { path: currentFilePath });
