@@ -14,6 +14,8 @@ import { findGitRoot } from "../lib/git-root";
 import { getSocketPath } from "../lib/socket-path";
 import { sendFileToExistingProcess } from "../lib/ipc-client";
 import { startIpcServer, stopIpcServer } from "../lib/ipc-server";
+import { startFileWatcher } from "../lib/file-watcher";
+import type { FileWatcher } from "../lib/file-watcher";
 import { initLogger, log } from "../lib/logger";
 import { formatMermaidError } from "../lib/mermaid-error";
 import type { MermaidErrorInfo } from "../lib/mermaid-error";
@@ -116,6 +118,7 @@ async function main(): Promise<void> {
   // 5. ファイル読み込み
   let markdownContent = loadMarkdownFile(filePath);
   let currentFilePath = filePath;
+  let watcher: FileWatcher | null = null;
 
   // 6. BrowserWindow を作成
   const win = new BrowserWindow({
@@ -132,6 +135,18 @@ async function main(): Promise<void> {
     win.webview.executeJavascript(
       `window.__MADO_RENDER__(${escapedContent})`
     );
+
+    // Hot Reload: ファイル監視開始
+    watcher = startFileWatcher(currentFilePath, (changedPath) => {
+      try {
+        const newContent = readFileSync(changedPath, "utf-8");
+        const escaped = JSON.stringify(newContent);
+        win.webview.executeJavascript(`window.__MADO_RENDER__(${escaped})`);
+        log("hot_reload_triggered", { path: changedPath });
+      } catch (err) {
+        log("error", { message: `hot reload read failed: ${String(err)}`, path: changedPath });
+      }
+    });
   });
 
   win.webview.on("did-navigate", () => {
@@ -158,6 +173,11 @@ async function main(): Promise<void> {
       const escaped = JSON.stringify(newContent);
       win.webview.executeJavascript(`window.__MADO_RENDER__(${escaped})`);
 
+      // Hot Reload: 監視対象を新しいファイルに切り替え
+      if (watcher) {
+        watcher.switchFile(newFilePath);
+      }
+
       console.log(
         `[mado] ファイルを切り替えました: ${path.basename(newFilePath)}`
       );
@@ -174,6 +194,9 @@ async function main(): Promise<void> {
 
   // 10. 終了処理
   process.on("beforeExit", () => {
+    if (watcher) {
+      watcher.stop();
+    }
     stopIpcServer(ipcServer, socketPath);
     log("file_closed", { path: currentFilePath });
     log("app_exited", { reason: "normal" });

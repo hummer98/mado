@@ -117,6 +117,11 @@ async function render(markdownText: string): Promise<void> {
 
   if (!contentEl) return;
 
+  // 初回レンダリング（ローディング状態からの遷移）ではスクロール復元しない
+  const isInitialRender =
+    loadingEl !== null && loadingEl.style.display !== "none";
+  const savedScrollY = isInitialRender ? 0 : window.scrollY;
+
   // ローディング非表示
   if (loadingEl) loadingEl.style.display = "none";
   contentEl.style.display = "block";
@@ -180,6 +185,9 @@ async function render(markdownText: string): Promise<void> {
       });
     }
   }
+
+  // Hot Reload 時のスクロール位置を復元（初回レンダリングでは復元しない）
+  window.scrollTo(0, savedScrollY);
 }
 
 // --- グローバル関数として公開 ---
