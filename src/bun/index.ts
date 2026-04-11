@@ -17,6 +17,8 @@ import { startIpcServer, stopIpcServer } from "../lib/ipc-server";
 import { startFileWatcher } from "../lib/file-watcher";
 import type { FileWatcher } from "../lib/file-watcher";
 import { initLogger, log } from "../lib/logger";
+import { startWsServer } from "../lib/ws-server";
+import type { WsServer } from "../lib/ws-server";
 import { formatMermaidError } from "../lib/mermaid-error";
 import type { MermaidErrorInfo } from "../lib/mermaid-error";
 
@@ -120,6 +122,9 @@ async function main(): Promise<void> {
   let currentFilePath = filePath;
   let watcher: FileWatcher | null = null;
 
+  // 5a. WebSocket サーバー起動（Hot Reload 配信用）
+  const wsServer: WsServer = startWsServer();
+
   // 6. BrowserWindow を作成
   const win = new BrowserWindow({
     title: `mado — ${path.basename(filePath)}`,
@@ -131,17 +136,21 @@ async function main(): Promise<void> {
   // 7. DOM 準備完了後に Markdown テキストを注入
   win.webview.on("dom-ready", () => {
     log("webview_state_changed", { state: "dom-ready" });
+
+    // 初期コンテンツは executeJavascript で注入（WebSocket 接続前のため）
     const escapedContent = JSON.stringify(markdownContent);
     win.webview.executeJavascript(
       `window.__MADO_RENDER__(${escapedContent})`
     );
 
-    // Hot Reload: ファイル監視開始
+    // WebSocket クライアントを起動（ポートを渡す）
+    win.webview.executeJavascript(`window.__MADO_WS_CONNECT__(${wsServer.port})`);
+
+    // Hot Reload: ファイル変更時は WebSocket で broadcast
     watcher = startFileWatcher(currentFilePath, (changedPath) => {
       try {
         const newContent = readFileSync(changedPath, "utf-8");
-        const escaped = JSON.stringify(newContent);
-        win.webview.executeJavascript(`window.__MADO_RENDER__(${escaped})`);
+        wsServer.broadcast({ type: "render", content: newContent, filePath: changedPath });
         log("hot_reload_triggered", { path: changedPath });
       } catch (err) {
         log("error", { message: `hot reload read failed: ${String(err)}`, path: changedPath });
@@ -169,9 +178,9 @@ async function main(): Promise<void> {
 
       log("file_switched", { from: previousPath, to: newFilePath });
 
-      // WebView の内容を更新
-      const escaped = JSON.stringify(newContent);
-      win.webview.executeJavascript(`window.__MADO_RENDER__(${escaped})`);
+      // TODO: WebSocket 接続前に IPC 切り替えが来た場合は broadcast が届かない可能性がある
+      // WebSocket で新コンテンツを配信（executeJavascript は使わない）
+      wsServer.broadcast({ type: "file-switched", content: newContent, filePath: newFilePath });
 
       // Hot Reload: 監視対象を新しいファイルに切り替え
       if (watcher) {
@@ -197,6 +206,7 @@ async function main(): Promise<void> {
     if (watcher) {
       watcher.stop();
     }
+    wsServer.stop();
     stopIpcServer(ipcServer, socketPath);
     log("file_closed", { path: currentFilePath });
     log("app_exited", { reason: "normal" });
