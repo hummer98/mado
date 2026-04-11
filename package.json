@@ -1,0 +1,23 @@
+{
+  "name": "mado",
+  "version": "0.0.1",
+  "description": "CLI-first Markdown viewer built with Electrobun",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "electrobun": "^1.16.0",
+    "marked": "^18.0.0",
+    "marked-gfm-heading-id": "^4.1.4",
+    "mermaid": "^11.14.0",
+    "highlight.js": "^11.11.1",
+    "github-markdown-css": "^5.8.1",
+    "zod": "^3.24.0"
+  },
+  "scripts": {
+    "start": "MADO_FILE=$(pwd)/README.md bun run build:dev && MADO_FILE=$(pwd)/README.md ./node_modules/.bin/electrobun dev",
+    "build:dev": "bun install && ./node_modules/.bin/electrobun build",
+    "test": "bun test"
+  }
+}

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mado</title>
+  <!-- GitHub Markdown スタイル -->
+  <link rel="stylesheet" href="views://mainview/github-markdown.css">
+  <!-- highlight.js テーマ（OS のカラースキームに合わせて切り替え） -->
+  <link rel="stylesheet" id="hljs-theme-light" href="views://mainview/hljs-github.css">
+  <link rel="stylesheet" id="hljs-theme-dark" href="views://mainview/hljs-github-dark.css" disabled>
+  <style>
+    /* ページ全体のベーススタイル */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--color-canvas-default, #ffffff);
+      color: var(--color-fg-default, #1f2328);
+    }
+
+    /* github-markdown-css のコンテナスタイル */
+    .markdown-body {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px;
+      box-sizing: border-box;
+    }
+
+    /* ダークモード対応 */
+    @media (prefers-color-scheme: dark) {
+      html, body {
+        background: #0d1117;
+        color: #e6edf3;
+      }
+    }
+
+    /* Mermaid ダイアグラムの中央揃え */
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      margin: 1em 0;
+    }
+
+    /* ローディング中インジケーター */
+    #loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <!-- ローディング中表示 -->
+  <div id="loading">読み込み中...</div>
+  <!-- Markdown レンダリング結果を表示するコンテナ -->
+  <article class="markdown-body" id="content" style="display: none;"></article>
+  <!-- WebView 側 JS（Bun によってバンドルされる） -->
+  <script type="module" src="views://mainview/index.js"></script>
+</body>
+</html>
