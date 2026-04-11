@@ -1,0 +1,13 @@
+# cmux-team 動的状態
+.team/
+
+# Bun
+node_modules/
+bun.lockb
+
+# Electrobun
+dist/
+build/
+
+# OS
+.DS_Store
