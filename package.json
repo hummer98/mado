@@ -36,6 +36,7 @@
   "scripts": {
     "start": "MADO_FILE=$(pwd)/README.md bun run build:dev && MADO_FILE=$(pwd)/README.md ./node_modules/.bin/electrobun dev",
     "build:dev": "bun install && ./node_modules/.bin/electrobun build",
+    "build:prod": "bun install && ./node_modules/.bin/electrobun build --env=stable",
     "test": "bun test"
   },
   "dependencies": {
