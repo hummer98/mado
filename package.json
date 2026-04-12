@@ -2,9 +2,41 @@
   "name": "mado",
   "version": "0.0.1",
   "description": "CLI-first Markdown viewer built with Electrobun",
-  "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "^5.0.0"
+  "license": "MIT",
+  "author": "Yuji Yamamoto",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hummer98/mado.git"
+  },
+  "homepage": "https://github.com/hummer98/mado#readme",
+  "bugs": "https://github.com/hummer98/mado/issues",
+  "keywords": [
+    "markdown",
+    "viewer",
+    "cli",
+    "macos",
+    "electrobun",
+    "mermaid",
+    "gfm"
+  ],
+  "bin": {
+    "mado": "./bin/mado"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "files": [
+    "build/",
+    "bin/",
+    "README.md",
+    "README.ja.md",
+    "LICENSE",
+    "docs/banner.svg"
+  ],
+  "scripts": {
+    "start": "MADO_FILE=$(pwd)/README.md bun run build:dev && MADO_FILE=$(pwd)/README.md ./node_modules/.bin/electrobun dev",
+    "build:dev": "bun install && ./node_modules/.bin/electrobun build",
+    "test": "bun test"
   },
   "dependencies": {
     "electrobun": "^1.16.0",
@@ -15,9 +47,8 @@
     "github-markdown-css": "^5.8.1",
     "zod": "^3.24.0"
   },
-  "scripts": {
-    "start": "MADO_FILE=$(pwd)/README.md bun run build:dev && MADO_FILE=$(pwd)/README.md ./node_modules/.bin/electrobun dev",
-    "build:dev": "bun install && ./node_modules/.bin/electrobun build",
-    "test": "bun test"
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
   }
 }

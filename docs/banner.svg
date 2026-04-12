@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="mado — CLI-first Markdown viewer">
+  <title>mado — CLI-first Markdown viewer</title>
+  <g transform="translate(60, 60)" stroke="#64748b" stroke-width="4" fill="none">
+    <rect x="0" y="0" width="180" height="180" rx="6"/>
+    <line x1="90" y1="0" x2="90" y2="180"/>
+    <line x1="0" y1="90" x2="180" y2="90"/>
+  </g>
+  <text x="300" y="110" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="72" font-weight="700" fill="#38bdf8">mado</text>
+  <text x="300" y="175" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="28" fill="#475569">
+    <tspan fill="#22c55e">$</tspan> mado README.md
+  </text>
+  <text x="300" y="225" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="20" fill="#64748b">A CLI-first native Markdown viewer</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#64748b" opacity="0.35">
+    <text x="1080" y="80" font-size="48">#</text>
+    <text x="1080" y="160" font-size="48">&gt;</text>
+    <text x="1080" y="240" font-size="32">```</text>
+  </g>
+</svg>
