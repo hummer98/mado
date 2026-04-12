@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# mado: Electrobun launcher ラッパー
+#
+# launcher は CLI 引数を bun 子プロセスへ forwarding しない Zig バイナリのため、
+# ファイルパスは環境変数 MADO_FILE 経由で渡す。
+# 呼び出し元 cwd を基準に絶対パス化する責務を持つ（bun 側は受け取った値を
+# そのまま path.resolve() に通す）。
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# macOS arm64 dev ビルド前提。将来 x64/Linux 対応時はパス検出を柔軟化する
+LAUNCHER="$PROJECT_ROOT/build/dev-macos-arm64/mado-dev.app/Contents/MacOS/launcher"
+
+if [ ! -x "$LAUNCHER" ]; then
+  echo "[mado] launcher が見つかりません。bun run build:dev を実行してください。" >&2
+  exit 1
+fi
+
+if [ -n "${1:-}" ]; then
+  if [[ "$1" = /* ]]; then
+    MADO_FILE="$1"
+  else
+    MADO_FILE="$(pwd)/$1"
+  fi
+else
+  MADO_FILE="$(pwd)/README.md"
+fi
+export MADO_FILE
+
+exec "$LAUNCHER"

@@ -56,4 +56,29 @@ describe("parseCliArgs", () => {
     const ok = result as CliArgsOk;
     expect(ok.warnings).toHaveLength(0);
   });
+
+  test("argv が無ければ MADO_FILE 環境変数を読む", () => {
+    // env に docs/seed.md の絶対パスを入れて、argv 無しで env 経由で拾われることを確認
+    const env = { MADO_FILE: path.resolve("docs/seed.md") };
+    const result = parseCliArgs(["node", "mado"], env);
+    expect(result.ok).toBe(true);
+    const ok = result as CliArgsOk;
+    expect(ok.filePath).toBe(path.resolve("docs/seed.md"));
+  });
+
+  test("argv が指定された場合は MADO_FILE より argv を優先する", () => {
+    // env は無関係なパス（存在しなくても argv が優先される）
+    const env = { MADO_FILE: path.resolve("docs/seed.md") };
+    const result = parseCliArgs(["node", "mado", "README.md"], env);
+    expect(result.ok).toBe(true);
+    const ok = result as CliArgsOk;
+    expect(ok.filePath).toBe(path.resolve("README.md"));
+  });
+
+  test("argv も env も無ければ README.md にフォールバック", () => {
+    const result = parseCliArgs(["node", "mado"], {});
+    expect(result.ok).toBe(true);
+    const ok = result as CliArgsOk;
+    expect(ok.filePath).toBe(path.resolve("README.md"));
+  });
 });

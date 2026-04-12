@@ -106,7 +106,8 @@ async function main(): Promise<void> {
     console.error(`[mado] エラー: ${result.error}`);
     process.exit(1);
   }
-  const { filePath, warnings } = result;
+  const { filePath, source, warnings } = result;
+  log("cli_parsed", { source, path: filePath });
   warnings.forEach((w) => console.warn(`[mado] ${w}`));
 
   // 2. git root 検出
