@@ -14,8 +14,92 @@
     html, body {
       margin: 0;
       padding: 0;
+      height: 100%;
       background: var(--color-canvas-default, #ffffff);
       color: var(--color-fg-default, #1f2328);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    /* 2 カラム grid レイアウト */
+    #app {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* サイドバー */
+    #sidebar {
+      border-right: 1px solid #d1d9e0;
+      background: #f6f8fa;
+      overflow-y: auto;
+      height: 100vh;
+      box-sizing: border-box;
+    }
+
+    #file-list {
+      list-style: none;
+      margin: 0;
+      padding: 4px 0;
+    }
+
+    .entry {
+      display: flex;
+      align-items: center;
+      padding: 0;
+      margin: 0;
+    }
+
+    .entry-label {
+      flex: 1;
+      text-align: left;
+      background: transparent;
+      border: none;
+      padding: 6px 8px 6px 12px;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .entry-label:hover {
+      background: #eaeef2;
+    }
+
+    .entry-close {
+      background: transparent;
+      border: none;
+      padding: 6px 10px;
+      cursor: pointer;
+      color: #57606a;
+      font-size: 14px;
+      line-height: 1;
+      visibility: hidden;
+    }
+
+    .entry:hover .entry-close,
+    .entry.active .entry-close {
+      visibility: visible;
+    }
+
+    .entry-close:hover {
+      background: #eaeef2;
+      color: #cf222e;
+    }
+
+    .entry.active .entry-label {
+      background: #ddf4ff;
+      font-weight: 600;
+    }
+
+    /* メイン領域 */
+    #main {
+      overflow-y: auto;
+      height: 100vh;
+      position: relative;
     }
 
     /* github-markdown-css のコンテナスタイル */
@@ -31,6 +115,23 @@
       html, body {
         background: #0d1117;
         color: #e6edf3;
+      }
+      #sidebar {
+        background: #161b22;
+        border-right-color: #30363d;
+      }
+      .entry-label:hover {
+        background: #21262d;
+      }
+      .entry-close {
+        color: #8b949e;
+      }
+      .entry-close:hover {
+        background: #21262d;
+        color: #f85149;
+      }
+      .entry.active .entry-label {
+        background: #1f3a5f;
       }
     }
 
@@ -69,17 +170,37 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      height: 100vh;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      height: 100%;
       color: #666;
+    }
+
+    /* 空状態プレースホルダ */
+    #empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #666;
+      padding: 32px;
+      text-align: center;
     }
   </style>
 </head>
 <body>
-  <!-- ローディング中表示 -->
-  <div id="loading">読み込み中...</div>
-  <!-- Markdown レンダリング結果を表示するコンテナ -->
-  <article class="markdown-body" id="content" style="display: none;"></article>
+  <div id="app">
+    <aside id="sidebar">
+      <ul id="file-list"></ul>
+    </aside>
+    <main id="main">
+      <div id="loading">読み込み中...</div>
+      <div id="empty-state" style="display: none;">
+        <p>ファイルが開かれていません。</p>
+        <p><code>mado &lt;file&gt;</code> で追加してください。</p>
+      </div>
+      <article class="markdown-body" id="content" style="display: none;"></article>
+    </main>
+  </div>
   <!-- WebView 側 JS（Bun によってバンドルされる） -->
   <script type="module" src="views://mainview/index.js"></script>
 </body>

@@ -2,18 +2,37 @@
  * WebSocket サーバー
  *
  * Bun.serve() の組み込み WebSocket サポートを使って、
- * Hot Reload メッセージを WebView クライアントにブロードキャストする。
+ * Hot Reload・ファイルリスト状態を WebView クライアントにブロードキャストする。
  * port: 0 でランダムポートを使用し、複数インスタンス起動時のポート衝突を防ぐ。
  */
 
 import type { ServerWebSocket } from "bun";
 import { z } from "zod";
 import { log } from "./logger";
+import type { FileListEntry } from "./file-list";
 
 /** サーバー → クライアント方向のメッセージ */
 export type WsServerMessage =
+  /** @deprecated state 駆動への移行に伴い廃止予定。state メッセージで置き換える。 */
   | { type: "render"; content: string; filePath: string }
-  | { type: "file-switched"; content: string; filePath: string };
+  /** @deprecated state 駆動への移行に伴い廃止予定。state メッセージで置き換える。 */
+  | { type: "file-switched"; content: string; filePath: string }
+  /** ファイルリスト状態 + 現在のアクティブファイル内容を 1 メッセージで配信 */
+  | {
+      type: "state";
+      files: FileListEntry[];
+      activeIndex: number;
+      content: string;
+      filePath: string;
+    };
+
+/** クライアント → サーバー方向のメッセージスキーマ */
+export const ClientMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("ready") }),
+  z.object({ type: z.literal("switch-file"), absolutePath: z.string().min(1) }),
+  z.object({ type: z.literal("remove-file"), absolutePath: z.string().min(1) }),
+]);
+export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
 /** WebSocket サーバーのインターフェース */
 export interface WsServer {
@@ -25,20 +44,22 @@ export interface WsServer {
   readonly port: number;
 }
 
-// クライアント → サーバー メッセージスキーマ（将来拡張用）
-const ClientMessageSchema = z.object({
-  type: z.enum(["ready"]),
-});
+export interface StartWsServerOptions {
+  /** クライアントメッセージ受信ハンドラ。例外は呼び出し側で捕捉してください。 */
+  onClientMessage?: (msg: ClientMessage) => void;
+}
 
 /**
  * WebSocket サーバーを起動する。
  * port: 0 でランダムな空きポートを OS が割り当てる。
  *
+ * @param options - onClientMessage コールバック等
  * @returns WsServer インスタンス（port, broadcast, stop）
  */
-export function startWsServer(): WsServer {
+export function startWsServer(options?: StartWsServerOptions): WsServer {
   // 接続中クライアントのセット
   const clients = new Set<ServerWebSocket<unknown>>();
+  const onClientMessage = options?.onClientMessage;
 
   const server = Bun.serve({
     port: 0, // ランダムポート
@@ -52,15 +73,29 @@ export function startWsServer(): WsServer {
         log("ws_client_disconnected", { total: clients.size });
       },
       message(_ws, data) {
-        // クライアントメッセージは現状ログのみ（将来: scroll-sync 等）
+        // クライアントメッセージを Zod でバリデートして onClientMessage に委譲
+        let raw: unknown;
         try {
-          const raw: unknown = JSON.parse(typeof data === "string" ? data : "");
-          const msg = ClientMessageSchema.safeParse(raw);
-          if (msg.success) {
-            log("ws_client_message", { type: msg.data.type });
-          }
-        } catch {
-          // 無効なメッセージは無視
+          raw = JSON.parse(typeof data === "string" ? data : "");
+        } catch (err) {
+          log("error", {
+            message: `ws message parse failed: ${String(err)}`,
+          });
+          return;
+        }
+
+        const parsed = ClientMessageSchema.safeParse(raw);
+        if (!parsed.success) {
+          log("error", {
+            message: `ws message schema invalid: ${parsed.error.message}`,
+          });
+          return;
+        }
+
+        log("ws_client_message", { type: parsed.data.type });
+
+        if (onClientMessage) {
+          onClientMessage(parsed.data);
         }
       },
     },

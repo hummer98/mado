@@ -2,7 +2,7 @@
  * WebView 側レンダリングエンジン
  *
  * Markdown テキストを GFM + Mermaid + highlight.js でレンダリングする。
- * メインプロセスからは window.__MADO_RENDER__(markdownText) で呼び出される。
+ * Bun 側からは WebSocket の state メッセージで content + ファイルリストを受け取る。
  */
 
 import { marked, type MarkedExtension } from "marked";
@@ -12,7 +12,6 @@ import mermaid from "mermaid";
 
 // --- marked の設定 ---
 
-// highlight.js を使ったカスタム renderer（コードブロックをハイライト）
 const hljsExtension: MarkedExtension = {
   renderer: {
     code({ text, lang }: { text: string; lang?: string }): string {
@@ -21,33 +20,29 @@ const hljsExtension: MarkedExtension = {
         return `<pre class="mermaid">${escapeHtml(text)}</pre>`;
       }
 
-      // highlight.js でシンタックスハイライト
       if (lang && hljs.getLanguage(lang)) {
         const highlighted = hljs.highlight(text, { language: lang, ignoreIllegals: true });
         return `<pre><code class="hljs language-${escapeHtml(lang)}">${highlighted.value}</code></pre>`;
       }
 
-      // 言語不明の場合は自動検出
       const highlighted = hljs.highlightAuto(text);
       return `<pre><code class="hljs">${highlighted.value}</code></pre>`;
     },
   },
 };
 
-// marked に拡張を適用
 marked.use(gfmHeadingId());
 marked.use(hljsExtension);
 marked.use({ gfm: true });
 
 // --- Mermaid の初期化 ---
 
-// OS のカラースキームに合わせてテーマを選択
 const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
 mermaid.initialize({
-  startOnLoad: false, // 手動で run() を呼ぶ
+  startOnLoad: false,
   theme: prefersDark ? "dark" : "default",
-  securityLevel: "loose", // クリックイベント等を許可
+  securityLevel: "loose",
 });
 
 // --- ダークモードに合わせた highlight.js テーマ切り替え ---
@@ -61,9 +56,7 @@ if (prefersDark) {
 
 // --- レンダリングパイプライン ---
 
-/**
- * HTML エスケープ（XSS 対策）
- */
+/** HTML エスケープ（XSS 対策） */
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -73,13 +66,11 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#039;");
 }
 
-/**
- * Mermaid エラー表示用の罫線ボックステキストを生成する。
- */
+/** Mermaid エラー表示用の罫線ボックステキストを生成する */
 function buildErrorBoxText(
   index: number,
   message: string,
-  code: string
+  code: string,
 ): string {
   const headerText = `Mermaid Error (diagram #${index + 1})`;
   const contentLines: string[] = [message];
@@ -105,28 +96,32 @@ function buildErrorBoxText(
   return `${top}\n${body}\n${bottom}`;
 }
 
+/** 直前にレンダリングしたファイルパス（同一なら scroll 維持、別なら top に戻す） */
+let lastRenderedFilePath: string | null = null;
+
 /**
  * Markdown テキストを DOM に描画する。
- * メインプロセスから window.__MADO_RENDER__(text) として呼ばれる。
  *
  * @param markdownText - レンダリングする Markdown テキスト
+ * @param filePath - 現在のファイルパス（スクロール維持判定用）
  */
-async function render(markdownText: string): Promise<void> {
+async function render(markdownText: string, filePath: string): Promise<void> {
   const contentEl = document.getElementById("content");
   const loadingEl = document.getElementById("loading");
+  const emptyEl = document.getElementById("empty-state");
+  const mainEl = document.getElementById("main");
 
   if (!contentEl) return;
 
-  // 初回レンダリング（ローディング状態からの遷移）ではスクロール復元しない
-  const isInitialRender =
-    loadingEl !== null && loadingEl.style.display !== "none";
-  const savedScrollY = isInitialRender ? 0 : window.scrollY;
+  // 同じファイルなら scroll 維持、別ファイルへ切替なら 0 にリセット
+  const isSameFile =
+    lastRenderedFilePath !== null && lastRenderedFilePath === filePath;
+  const savedScrollY = isSameFile && mainEl ? mainEl.scrollTop : 0;
 
-  // ローディング非表示
   if (loadingEl) loadingEl.style.display = "none";
+  if (emptyEl) emptyEl.style.display = "none";
   contentEl.style.display = "block";
 
-  // marked で Markdown → HTML に変換
   let html: string;
   try {
     const result = marked(markdownText);
@@ -137,16 +132,15 @@ async function render(markdownText: string): Promise<void> {
     return;
   }
 
-  // DOM に挿入
   contentEl.innerHTML = html;
 
-  // Mermaid ダイアグラムを個別に検証し、エラーがあればインライン表示する
   const mermaidNodes = contentEl.querySelectorAll<HTMLElement>(".mermaid");
   const validNodes: HTMLElement[] = [];
   const errors: Array<{ index: number; message: string; code: string }> = [];
 
   for (let i = 0; i < mermaidNodes.length; i++) {
     const node = mermaidNodes[i];
+    if (!node) continue;
     const code = node.textContent ?? "";
 
     try {
@@ -156,7 +150,6 @@ async function render(markdownText: string): Promise<void> {
       const message = err instanceof Error ? err.message : String(err);
       errors.push({ index: i, message, code });
 
-      // エラー表示用の DOM に置き換え
       const errorPre = document.createElement("pre");
       errorPre.className = "mermaid-error";
       errorPre.textContent = buildErrorBoxText(i, message, code);
@@ -166,7 +159,6 @@ async function render(markdownText: string): Promise<void> {
     }
   }
 
-  // parse に成功したノードのみ mermaid.run() に渡す
   if (validNodes.length > 0) {
     try {
       await mermaid.run({ nodes: validNodes });
@@ -175,7 +167,6 @@ async function render(markdownText: string): Promise<void> {
     }
   }
 
-  // エラー情報をメインプロセスに通知
   if (errors.length > 0 && "__electrobunSendToHost" in window) {
     const sendToHost = window.__electrobunSendToHost;
     if (typeof sendToHost === "function") {
@@ -186,33 +177,126 @@ async function render(markdownText: string): Promise<void> {
     }
   }
 
-  // Hot Reload 時のスクロール位置を復元（初回レンダリングでは復元しない）
-  window.scrollTo(0, savedScrollY);
+  if (mainEl) {
+    mainEl.scrollTop = savedScrollY;
+  }
+  lastRenderedFilePath = filePath;
+}
+
+// --- サイドバー描画 ---
+
+interface FileListEntry {
+  absolutePath: string;
+  relativePath: string;
+}
+
+interface ServerStateMessage {
+  type: "state";
+  files: FileListEntry[];
+  activeIndex: number;
+  content: string;
+  filePath: string;
+}
+
+let wsRef: WebSocket | null = null;
+
+/**
+ * サイドバーのファイルリストを描画する。
+ */
+function renderSidebar(files: FileListEntry[], activeIndex: number): void {
+  const list = document.getElementById("file-list");
+  if (!list) return;
+
+  list.innerHTML = "";
+  files.forEach((entry, idx) => {
+    const li = document.createElement("li");
+    li.className = idx === activeIndex ? "entry active" : "entry";
+    li.dataset.absolutePath = entry.absolutePath;
+
+    const label = document.createElement("button");
+    label.type = "button";
+    label.className = "entry-label";
+    label.textContent = entry.relativePath;
+    label.title = entry.absolutePath;
+    label.addEventListener("click", () => {
+      sendClientMessage({ type: "switch-file", absolutePath: entry.absolutePath });
+    });
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "entry-close";
+    close.textContent = "✗";
+    close.title = "リストから削除";
+    close.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      sendClientMessage({ type: "remove-file", absolutePath: entry.absolutePath });
+    });
+
+    li.appendChild(label);
+    li.appendChild(close);
+    list.appendChild(li);
+  });
+}
+
+/** 空状態の表示を切り替える */
+function updateEmptyState(isEmpty: boolean): void {
+  const emptyEl = document.getElementById("empty-state");
+  const contentEl = document.getElementById("content");
+  const loadingEl = document.getElementById("loading");
+  if (loadingEl) loadingEl.style.display = "none";
+  if (isEmpty) {
+    if (emptyEl) emptyEl.style.display = "flex";
+    if (contentEl) {
+      contentEl.style.display = "none";
+      contentEl.innerHTML = "";
+    }
+    lastRenderedFilePath = null;
+  } else {
+    if (emptyEl) emptyEl.style.display = "none";
+  }
+}
+
+/** クライアント→サーバーメッセージ型 */
+type ClientMessage =
+  | { type: "ready" }
+  | { type: "switch-file"; absolutePath: string }
+  | { type: "remove-file"; absolutePath: string };
+
+function sendClientMessage(msg: ClientMessage): void {
+  if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
+    console.warn("[mado] ws not ready, dropping message:", msg);
+    return;
+  }
+  try {
+    wsRef.send(JSON.stringify(msg));
+  } catch (err) {
+    console.error("[mado] ws send failed:", err);
+  }
 }
 
 // --- WebSocket クライアント ---
 
-/** WebSocket からのサーバーメッセージ型 */
-type WsServerMessage =
-  | { type: "render"; content: string; filePath: string }
-  | { type: "file-switched"; content: string; filePath: string };
-
-/** WsServerMessage の型ガード */
-function isWsServerMessage(data: unknown): data is WsServerMessage {
+/** state メッセージの型ガード */
+function isStateMessage(data: unknown): data is ServerStateMessage {
   if (typeof data !== "object" || data === null) return false;
   const obj = data as Record<string, unknown>;
-  return (
-    (obj.type === "render" || obj.type === "file-switched") &&
-    typeof obj.content === "string" &&
-    typeof obj.filePath === "string"
-  );
+  if (obj.type !== "state") return false;
+  if (!Array.isArray(obj.files)) return false;
+  if (typeof obj.activeIndex !== "number") return false;
+  if (typeof obj.content !== "string") return false;
+  if (typeof obj.filePath !== "string") return false;
+  for (const f of obj.files) {
+    if (typeof f !== "object" || f === null) return false;
+    const fe = f as Record<string, unknown>;
+    if (typeof fe.absolutePath !== "string") return false;
+    if (typeof fe.relativePath !== "string") return false;
+  }
+  return true;
 }
 
 /**
- * WebSocket クライアントを起動し、Hot Reload メッセージを待機する。
+ * WebSocket クライアントを起動し、state メッセージを処理する。
  * 接続が切れた場合は指数バックオフで再接続を試みる。
- *
- * @param port - Bun 側 WS サーバーのポート番号
  */
 function connectWebSocket(port: number): void {
   let retryCount = 0;
@@ -221,20 +305,34 @@ function connectWebSocket(port: number): void {
 
   function connect(): void {
     const ws = new WebSocket(`ws://localhost:${port}`);
+    wsRef = ws;
 
     ws.onopen = () => {
       retryCount = 0;
       console.log("[mado] WebSocket connected");
+      // 初回 / 再接続時に現状を取得するため ready を送る
+      try {
+        ws.send(JSON.stringify({ type: "ready" }));
+      } catch (err) {
+        console.error("[mado] ready send failed:", err);
+      }
     };
 
     ws.onmessage = (event: MessageEvent) => {
       try {
         const raw: unknown = JSON.parse(event.data as string);
-        if (!isWsServerMessage(raw)) return;
+        if (!isStateMessage(raw)) return;
 
-        // render / file-switched はどちらも同じレンダリングパイプラインを使う
-        render(raw.content).catch((err: unknown) => {
-          console.error("[mado] ws render error:", err);
+        renderSidebar(raw.files, raw.activeIndex);
+
+        if (raw.files.length === 0) {
+          updateEmptyState(true);
+          return;
+        }
+
+        updateEmptyState(false);
+        render(raw.content, raw.filePath).catch((err: unknown) => {
+          console.error("[mado] render error:", err);
         });
       } catch (err) {
         console.error("[mado] ws message parse error:", err);
@@ -242,6 +340,7 @@ function connectWebSocket(port: number): void {
     };
 
     ws.onclose = () => {
+      wsRef = null;
       if (retryCount >= MAX_RETRIES) {
         console.warn("[mado] WebSocket: max retries exceeded, giving up");
         return;
@@ -254,7 +353,6 @@ function connectWebSocket(port: number): void {
 
     ws.onerror = (event: Event) => {
       console.error("[mado] WebSocket error:", event);
-      // onclose が続けて呼ばれるので再接続はそちらで行う
     };
   }
 
@@ -263,39 +361,21 @@ function connectWebSocket(port: number): void {
 
 // --- グローバル関数として公開 ---
 
-// window に型を付与
 declare global {
   interface Window {
-    __MADO_RENDER__: (markdownText: string) => void;
     __MADO_WS_CONNECT__: (port: number) => void;
     /** Electrobun のプリロードが提供する host-message 送信関数 */
     __electrobunSendToHost?: (data: unknown) => void;
   }
 }
 
-/**
- * メインプロセスから呼ばれるエントリポイント。
- * executeJavascript(`window.__MADO_RENDER__(${JSON.stringify(text)})`) で呼び出す。
- */
-window.__MADO_RENDER__ = (markdownText: string): void => {
-  render(markdownText).catch((err: unknown) => {
-    console.error("[mado] render error:", err);
-  });
-};
-
-// 重複接続ガード: dom-ready が複数回発火しても1回だけ接続する
+// 重複接続ガード
 let wsConnected = false;
 
-/**
- * WebSocket クライアントを起動する。
- * executeJavascript(`window.__MADO_WS_CONNECT__(port)`) で呼び出す。
- * dom-ready が複数回発火しても1回しか接続しない。
- */
 window.__MADO_WS_CONNECT__ = (port: number): void => {
   if (wsConnected) return;
   wsConnected = true;
   connectWebSocket(port);
 };
 
-// DOM が既に準備完了している場合に備えて renderer_started ログを記録
 console.log("[mado] renderer_started");
