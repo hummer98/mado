@@ -8,6 +8,7 @@ bun.lockb
 # Electrobun
 dist/
 build/
+artifacts/
 
 # OS
 .DS_Store
