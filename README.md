@@ -1,62 +1,68 @@
+<p align="center">
+  <img src="./docs/banner.svg" alt="mado" width="100%" />
+</p>
+
+<p align="center">
+  <a href="./README.ja.md">日本語版</a>
+</p>
+
 # mado
 
-CLI-first Markdown viewer built with Electrobun (Bun + WKWebView).
+> A CLI-first native Markdown viewer for macOS, powered by Electrobun.
 
-## 使い方
+<!-- TODO: screenshot -->
+
+## Features
+
+- **GFM support** — GitHub Flavored Markdown via `marked` + `marked-gfm-heading-id`
+- **Mermaid v11** — Diagrams rendered natively
+- **Syntax highlighting** — via `highlight.js`
+- **GitHub-compatible styling** — via `github-markdown-css`
+- **Hot Reload** — `fs.watch` + WebSocket + scroll-preserving DOM swap
+- **CLI launcher** — `mado README.md` opens a native window instantly
+- **File history sidebar** — quick access to recently opened files
+- **Structured logging** — one-line events with local ISO 8601 timestamps
+
+## Install
+
+> Note: mado is not yet published to a registry. For now, clone and build from source (see Development). The command below will work once published.
 
 ```bash
-mado README.md          # ネイティブウィンドウで開く（Hot Reload 付き）
-mado https://...        # URL を開く
-mado render file.md     # PNG を出力（AI 向け画像変換）
+bun install -g mado
 ```
 
-## 機能
+## Usage
 
-- **GFM (GitHub Flavored Markdown)** 対応
-- **Mermaid ダイアグラム** 対応
-- **シンタックスハイライト** (highlight.js)
-- **Hot Reload** — ファイル変更を自動反映
-
-## テーブル
-
-| 機能 | ステータス |
-|------|----------|
-| GFM レンダリング | ✅ Phase 1 |
-| Mermaid | ✅ Phase 1 |
-| Hot Reload | 🔧 Phase 2 |
-| CLI 統合 | 🔧 Phase 2 |
-
-## タスクリスト
-
-- [x] Electrobun プロジェクト初期化
-- [x] ログ基盤の実装
-- [x] Markdown レンダリング
-- [ ] Hot Reload
-- [ ] CLI 統合
-
-## コードブロック
-
-```typescript
-import { BrowserWindow } from "electrobun/bun";
-
-const win = new BrowserWindow({
-  title: "mado",
-  frame: { width: 900, height: 700, x: 0, y: 0 },
-  url: "views://mainview/index.html",
-});
+```bash
+mado README.md           # open a local file
+mado docs/seed.md        # relative paths resolved against cwd
+mado https://...         # open a URL (planned)
 ```
 
-## Mermaid ダイアグラム
+Changes to the file are detected automatically and the view updates without losing your scroll position.
 
-```mermaid
-graph TD
-    A[CLI 引数] --> B[Bun メインプロセス]
-    B --> C[Markdown ファイル読み込み]
-    C --> D[BrowserWindow 作成]
-    D --> E[WebView]
-    E --> F[marked でパース]
-    F --> G[Mermaid 変換]
-    F --> H[highlight.js ハイライト]
-    G --> I[レンダリング完了]
-    H --> I
+## How it works
+
+mado is built on [Electrobun](https://electrobun.dev) — a lightweight framework combining [Bun](https://bun.sh) with the native macOS WKWebView. A thin Bun process parses CLI args, watches the file, and pushes updates over WebSocket to the WebView, which renders Markdown with `marked` + `mermaid`.
+
+See [docs/seed.md](./docs/seed.md) for the full product concept and architecture.
+
+## Development
+
+Prerequisites: macOS (arm64), [Bun](https://bun.sh) >= 1.0.
+
+```bash
+bun install              # install deps
+bun start                # run the dev app
+bun test                 # unit tests
+bun test:rendering       # Playwright rendering tests
+bun test:e2e             # Electrobun integration tests
 ```
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
+
+## Contributing
+
+Issue-based contributions welcome. Please file an issue before large changes so we can discuss scope. For small fixes, feel free to open a PR directly.
