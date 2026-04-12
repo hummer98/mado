@@ -270,7 +270,11 @@ echo "✅ タグ v$NEXT_VERSION を作成 & プッシュ"
 
 ```bash
 # CHANGELOG から該当バージョンの section を抽出
-RELEASE_NOTES=$(awk "/^## \[$NEXT_VERSION\]/,/^## \[/" CHANGELOG.md | sed '$d' | tail -n +2)
+RELEASE_NOTES=$(awk -v version="$NEXT_VERSION" '
+  $0 ~ "^## \\[" version "\\]" { flag=1; next }
+  /^## \[/ { flag=0 }
+  flag
+' CHANGELOG.md)
 
 gh release create "v$NEXT_VERSION" \
   --title "mado v$NEXT_VERSION" \
