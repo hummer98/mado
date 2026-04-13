@@ -11,7 +11,7 @@
  * ファイルリストの状態は本プロセスで一元管理し、WebView 側は state メッセージを受け取って描画するだけ。
  */
 
-import Electrobun, { ApplicationMenu, BrowserWindow, Utils } from "electrobun/bun";
+import Electrobun, { ApplicationMenu, BrowserWindow, Screen, Utils } from "electrobun/bun";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import type net from "node:net";
@@ -41,6 +41,16 @@ import { decideStartupMode } from "./startup";
 import { computeUpgradeToFileMode } from "../lib/upgrade-mode";
 import { installApplicationMenu } from "./menu";
 import type { WindowSummary } from "./menu";
+import {
+  DEFAULT_BOUNDS,
+  clampBoundsToDisplays,
+  createWindowStateSaver,
+  getBoundsForKey,
+  loadWindowStateStore,
+  resolveStateKey,
+  type WindowBounds,
+  type WindowStateSaver,
+} from "../lib/window-state";
 
 /**
  * Markdown ファイルを読み込む。失敗時はフォールバックコンテンツを返す。
@@ -66,6 +76,48 @@ function extractClosedWindowId(event: unknown): number | null {
   if (typeof data !== "object" || data === null) return null;
   const id = (data as { id?: unknown }).id;
   return typeof id === "number" && Number.isFinite(id) ? id : null;
+}
+
+/**
+ * resize/move イベントの event.data から座標を抽出する。
+ * 未知形式なら空オブジェクトを返し、呼び出し側は getFrame() にフォールバックする。
+ */
+function extractBounds(event: unknown): {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+} {
+  if (typeof event !== "object" || event === null) return {};
+  const data = (event as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return {};
+  const d = data as Record<string, unknown>;
+  const out: { x?: number; y?: number; width?: number; height?: number } = {};
+  if (typeof d.x === "number" && Number.isFinite(d.x)) out.x = d.x;
+  if (typeof d.y === "number" && Number.isFinite(d.y)) out.y = d.y;
+  if (typeof d.width === "number" && Number.isFinite(d.width)) out.width = d.width;
+  if (typeof d.height === "number" && Number.isFinite(d.height)) out.height = d.height;
+  return out;
+}
+
+/**
+ * Screen.getAllDisplays() でクランプを試みる。例外や空配列時は primary でリトライ、
+ * それも失敗したら DEFAULT_BOUNDS を返す。
+ */
+function clampWithDefaultDisplays(bounds: WindowBounds): WindowBounds {
+  try {
+    const all = Screen.getAllDisplays();
+    if (all.length > 0) {
+      return clampBoundsToDisplays(bounds, all);
+    }
+    const primary = Screen.getPrimaryDisplay();
+    if (primary.workArea.width > 0 && primary.workArea.height > 0) {
+      return clampBoundsToDisplays(bounds, [primary]);
+    }
+  } catch (err) {
+    log("window_state_clamp_failed", { reason: String(err) });
+  }
+  return { ...DEFAULT_BOUNDS };
 }
 
 /**
@@ -361,12 +413,44 @@ async function main(): Promise<void> {
 
   // 7. BrowserWindow を作成
   // welcome モードでは activePath=null, gitRoot=null となり buildWindowTitle が "mado" を返す。
+  // file mode のみ保存済み bounds を復元する（Welcome は永続化しない仕様）。
   const knownWindows: Array<{ id: number; title: string }> = [];
+  const initialStateKey = welcomeMode ? null : resolveStateKey(detectedGitRoot);
+  const loadedStore = welcomeMode ? {} : loadWindowStateStore();
+  const savedBounds = initialStateKey
+    ? getBoundsForKey(loadedStore, initialStateKey)
+    : null;
+  const initialBounds: WindowBounds = savedBounds
+    ? clampWithDefaultDisplays(savedBounds)
+    : { ...DEFAULT_BOUNDS };
+  if (savedBounds && initialStateKey) {
+    log("window_state_loaded", {
+      key: initialStateKey,
+      width: initialBounds.width,
+      height: initialBounds.height,
+      x: initialBounds.x,
+      y: initialBounds.y,
+    });
+  }
+
   const win = new BrowserWindow({
     title: buildWindowTitle({ activePath: initialFilePath, gitRoot: detectedGitRoot }),
-    frame: { width: 900, height: 700, x: 0, y: 0 },
+    frame: {
+      x: initialBounds.x,
+      y: initialBounds.y,
+      width: initialBounds.width,
+      height: initialBounds.height,
+    },
     url: "views://mainview/index.html",
   });
+  // 復元時に maximized だった場合はウィンドウ作成直後に最大化する (Review #4)
+  if (savedBounds?.maximized === true) {
+    try {
+      win.maximize();
+    } catch (err) {
+      log("window_state_maximize_failed", { reason: String(err) });
+    }
+  }
   knownWindows.push({ id: win.id, title: win.title });
   log("webview_state_changed", { state: "creating" });
   if (welcomeMode) {
@@ -518,11 +602,57 @@ async function main(): Promise<void> {
     openFileDialog: (opts) => Utils.openFileDialog(opts),
   });
 
+  // 10c. ウィンドウ状態の永続化 (T022)
+  //
+  // Welcome モードでは saver を生成しない（仕様：welcome は記憶しない）。
+  // file mode、または welcome→file 遷移後に ensureSaver() で遅延生成する。
+  let saver: WindowStateSaver | null = null;
+
+  function ensureSaver(): WindowStateSaver | null {
+    if (saver) return saver;
+    if (welcomeMode) return null;
+    const key = resolveStateKey(detectedGitRoot);
+    saver = createWindowStateSaver({ key });
+    return saver;
+  }
+
+  function handleBoundsChanged(partial: {
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  }): void {
+    const s = ensureSaver();
+    if (!s) return;
+    try {
+      const frame = win.getFrame();
+      const bounds: WindowBounds = {
+        x: Math.round(partial.x ?? frame.x),
+        y: Math.round(partial.y ?? frame.y),
+        width: Math.round(partial.width ?? frame.width),
+        height: Math.round(partial.height ?? frame.height),
+        maximized: win.isMaximized(),
+      };
+      s.schedule(bounds);
+    } catch (err) {
+      log("window_state_capture_failed", { reason: String(err) });
+    }
+  }
+
+  win.on("resize", (event) => {
+    handleBoundsChanged(extractBounds(event));
+  });
+  win.on("move", (event) => {
+    handleBoundsChanged(extractBounds(event));
+  });
+
   // ウィンドウ増減を Window メニューへ反映。
   // Electrobun 側 close リスナーで BrowserWindowMap から削除された後に
   // 自前の knownWindows からも削除 → rebuild() の順序を保証するため、
   // close ハンドラ内は queueMicrotask で 1 拍遅延させて実行する。
   Electrobun.events.on("close", (event: unknown) => {
+    // 閉じる直前に保留中の bounds を同期 flush
+    if (saver) saver.flush();
     const closedId = extractClosedWindowId(event);
     if (closedId !== null) {
       const idx = knownWindows.findIndex((w) => w.id === closedId);
@@ -530,11 +660,23 @@ async function main(): Promise<void> {
     }
     queueMicrotask(() => menuCtrl.rebuild());
   });
+
+  // before-quit: アプリ終了前の最終 flush (Review #1 に従い必ず { allow: true } を返す)
+  Electrobun.events.on("before-quit", () => {
+    if (saver) saver.flush();
+    return { allow: true };
+  });
+
   // 初期ウィンドウ生成直後にも再構築（タイトル反映等のため）
   queueMicrotask(() => menuCtrl.rebuild());
 
   // 11. 終了処理
   process.on("beforeExit", () => {
+    if (saver) {
+      saver.flush();
+      saver.dispose();
+      saver = null;
+    }
     if (watcher) {
       watcher.stop();
     }
