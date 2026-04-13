@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-04-13
+
+### Added
+- welcome window on no-args launch (T020)
+- implement macOS native menu bar (File/Window/App)
+- accordion sidebar toggle with animation
+- window title as "mado - <project> - <file path>"
+
+### Fixed
+- correct CHANGELOG extraction in release skill for latest section
+
+
 ## [0.0.1] - 2026-04-12
 ### Added
 - Initial MVP: CLI-first Markdown viewer (`mado <file.md>` / `mado <url>` / `mado render <file>`)
