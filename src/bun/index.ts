@@ -8,7 +8,7 @@
  * ファイルリストの状態は本プロセスで一元管理し、WebView 側は state メッセージを受け取って描画するだけ。
  */
 
-import { BrowserWindow } from "electrobun/bun";
+import Electrobun, { ApplicationMenu, BrowserWindow, Utils } from "electrobun/bun";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { parseCliArgs } from "../lib/cli";
@@ -33,6 +33,8 @@ import {
 } from "../lib/file-list";
 import type { FileListEntry, FileListState } from "../lib/file-list";
 import { buildWindowTitle } from "../lib/window-title";
+import { installApplicationMenu } from "./menu";
+import type { WindowSummary } from "./menu";
 
 /**
  * Markdown ファイルを読み込む。失敗時はフォールバックコンテンツを返す。
@@ -47,6 +49,17 @@ function loadMarkdownFile(filePath: string): string {
     console.error(`[mado] ファイルを開けませんでした: ${filePath}`);
     return `# mado\n\nファイルを開けませんでした: \`${filePath}\`\n`;
   }
+}
+
+/**
+ * Electrobun の close イベントから id を抽出する。未知形式なら null。
+ */
+function extractClosedWindowId(event: unknown): number | null {
+  if (typeof event !== "object" || event === null) return null;
+  const data = (event as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return null;
+  const id = (data as { id?: unknown }).id;
+  return typeof id === "number" && Number.isFinite(id) ? id : null;
 }
 
 /**
@@ -309,11 +322,14 @@ async function main(): Promise<void> {
   }
 
   // 7. BrowserWindow を作成
+  // Window メニュー用に自前で作成済みウィンドウを追跡する。
+  const knownWindows: Array<{ id: number; title: string }> = [];
   const win = new BrowserWindow({
     title: buildWindowTitle({ activePath: filePath, gitRoot: detectedGitRoot }),
     frame: { width: 900, height: 700, x: 0, y: 0 },
     url: "views://mainview/index.html",
   });
+  knownWindows.push({ id: win.id, title: win.title });
   log("webview_state_changed", { state: "creating" });
 
   /**
@@ -355,8 +371,11 @@ async function main(): Promise<void> {
     handleMermaidErrorEvent(event);
   });
 
-  // 10. IPC サーバー起動（2 回目以降の起動からファイルパスを受信）
-  const ipcServer = startIpcServer(socketPath, (newFilePath) => {
+  /**
+   * 絶対パスを state に追加し、必要なら watcher 切替と WebView 再配信を行う。
+   * IPC 受信経路とメニュー Open... 経路で共通利用する。
+   */
+  function addFileToState(newFilePath: string): void {
     try {
       const entry = buildEntry(newFilePath);
       const before = state.files.length;
@@ -395,7 +414,44 @@ async function main(): Promise<void> {
       });
       console.error(`[mado] ファイルを追加できませんでした: ${newFilePath}`);
     }
+  }
+
+  // 10. IPC サーバー起動（2 回目以降の起動からファイルパスを受信）
+  const ipcServer = startIpcServer(socketPath, (newFilePath) => {
+    addFileToState(newFilePath);
   });
+
+  // 10b. macOS アプリケーションメニューをインストール
+  //
+  // close イベント時に Window メニューを更新するが、Electrobun 側の close 処理で
+  // BrowserWindowMap から削除される前に rebuild() が走ると閉じたウィンドウが
+  // 一覧に残る恐れがあるため、queueMicrotask で 1 拍遅延させて実行する。
+  const menuCtrl = installApplicationMenu(ApplicationMenu, {
+    openMarkdownFile: (absPath) => addFileToState(absPath),
+    listWindows: (): WindowSummary[] => knownWindows.slice(),
+    focusWindowById: (id) => {
+      const target = BrowserWindow.getById(id);
+      if (target) {
+        target.focus();
+      }
+    },
+    openFileDialog: (opts) => Utils.openFileDialog(opts),
+  });
+
+  // ウィンドウ増減を Window メニューへ反映。
+  // Electrobun 側 close リスナーで BrowserWindowMap から削除された後に
+  // 自前の knownWindows からも削除 → rebuild() の順序を保証するため、
+  // close ハンドラ内は queueMicrotask で 1 拍遅延させて実行する。
+  Electrobun.events.on("close", (event: unknown) => {
+    const closedId = extractClosedWindowId(event);
+    if (closedId !== null) {
+      const idx = knownWindows.findIndex((w) => w.id === closedId);
+      if (idx >= 0) knownWindows.splice(idx, 1);
+    }
+    queueMicrotask(() => menuCtrl.rebuild());
+  });
+  // 初期ウィンドウ生成直後にも再構築（タイトル反映等のため）
+  queueMicrotask(() => menuCtrl.rebuild());
 
   // 11. 終了処理
   process.on("beforeExit", () => {
