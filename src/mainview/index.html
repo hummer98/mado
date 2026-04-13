@@ -196,16 +196,50 @@
       color: #666;
     }
 
-    /* 空状態プレースホルダ */
+    /* 空状態 / ウェルカムプレースホルダ */
     #empty-state {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 100%;
-      color: #666;
+      color: #57606a;
       padding: 32px;
       text-align: center;
+      gap: 12px;
+    }
+
+    .welcome-title {
+      font-size: 56px;
+      font-weight: 300;
+      margin: 0;
+      letter-spacing: 2px;
+      color: var(--color-fg-default, #1f2328);
+    }
+
+    .welcome-hint {
+      font-size: 15px;
+      margin: 0;
+    }
+
+    .welcome-cli code {
+      background: rgba(175, 184, 193, 0.2);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 13px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .welcome-title {
+        color: #e6edf3;
+      }
+      #empty-state {
+        color: #8b949e;
+      }
+      .welcome-cli code {
+        background: rgba(110, 118, 129, 0.3);
+      }
     }
   </style>
 </head>
@@ -216,9 +250,10 @@
     </aside>
     <main id="main">
       <div id="loading">読み込み中...</div>
-      <div id="empty-state" style="display: none;">
-        <p>ファイルが開かれていません。</p>
-        <p><code>mado &lt;file&gt;</code> で追加してください。</p>
+      <div id="empty-state" class="welcome" style="display: none;">
+        <h1 class="welcome-title">mado</h1>
+        <p class="welcome-hint">⌘O で Markdown ファイルを開く</p>
+        <p class="welcome-cli"><code>mado README.md</code></p>
       </div>
       <article class="markdown-body" id="content" style="display: none;"></article>
     </main>

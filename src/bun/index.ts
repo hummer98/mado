@@ -5,12 +5,16 @@
  * 同じ git root のプロセスが既に起動中なら IPC でファイルパスを送信して終了する。
  * 初回起動なら BrowserWindow を作成し、IPC サーバー + WS サーバーを起動する。
  *
+ * 引数も env.MADO_FILE も無い場合 (Finder/Launchpad 起動) は welcome モードで起動し、
+ * ⌘O 等で最初のファイルが追加された時点で file mode に昇格する (`upgradeToFileMode`)。
+ *
  * ファイルリストの状態は本プロセスで一元管理し、WebView 側は state メッセージを受け取って描画するだけ。
  */
 
 import Electrobun, { ApplicationMenu, BrowserWindow, Utils } from "electrobun/bun";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
+import type net from "node:net";
 import { parseCliArgs } from "../lib/cli";
 import { findGitRoot } from "../lib/git-root";
 import { getSocketPath } from "../lib/socket-path";
@@ -33,6 +37,8 @@ import {
 } from "../lib/file-list";
 import type { FileListEntry, FileListState } from "../lib/file-list";
 import { buildWindowTitle } from "../lib/window-title";
+import { decideStartupMode } from "./startup";
+import { computeUpgradeToFileMode } from "../lib/upgrade-mode";
 import { installApplicationMenu } from "./menu";
 import type { WindowSummary } from "./menu";
 
@@ -114,46 +120,78 @@ async function main(): Promise<void> {
   initLogger();
   log("app_started", { version: "0.0.1" });
 
-  // 1. CLI 引数パース
-  const result = parseCliArgs(process.argv);
-  if (!result.ok) {
-    console.error(`[mado] エラー: ${result.error}`);
+  // 1. CLI 引数パース → 起動モード決定
+  const parseResult = parseCliArgs(process.argv);
+  const startup = decideStartupMode(parseResult);
+  if (startup.kind === "error") {
+    console.error(`[mado] エラー: ${startup.message}`);
     process.exit(1);
   }
-  const { filePath, source, warnings } = result;
-  log("cli_parsed", { source, path: filePath });
-  warnings.forEach((w) => console.warn(`[mado] ${w}`));
 
-  // 2. git root 検出
-  //    detectedGitRoot: 実際に検出できたか（null 可）を保持。ウィンドウタイトル生成に使う。
-  //    gitRoot:         ソケットパス算出・相対パス計算用に fallback を含んだ値。
-  const detectedGitRoot = findGitRoot(filePath);
-  const gitRoot = detectedGitRoot ?? path.dirname(filePath);
-  log("git_root_detected", { gitRoot, filePath, detected: detectedGitRoot !== null });
+  // welcome か file かで初期化の仕方を切り替える。
+  // 共通: gitRoot / detectedGitRoot / ipcServer / socketPath は mutable 化し、
+  // welcome → file 遷移時に upgradeToFileMode() で確定する。
+  let welcomeMode = startup.kind === "welcome";
+  let detectedGitRoot: string | null = null;
+  let gitRoot: string | null = null;
+  let ipcServer: net.Server | null = null;
+  let ipcSocketPath: string | null = null;
+  const initialFilePath: string | null =
+    startup.kind === "file" ? startup.filePath : null;
 
-  // 3. ソケットパス算出
-  const socketPath = getSocketPath(gitRoot);
+  if (startup.kind === "file") {
+    // file mode: 既存挙動。CLI 引数 / env.MADO_FILE で明示されたファイルを開く。
+    if (parseResult.ok && parseResult.mode === "file") {
+      log("cli_parsed", { source: parseResult.source, path: parseResult.filePath });
+      parseResult.warnings.forEach((w) => console.warn(`[mado] ${w}`));
+    }
 
-  // 4. 既存プロセスへの委譲を試みる
-  const delegated = await sendFileToExistingProcess(socketPath, filePath);
-  if (delegated) {
-    log("file_delegated", { path: filePath, gitRoot });
-    console.log(
-      `[mado] 既存ウィンドウにファイルを送信しました: ${path.basename(filePath)}`,
-    );
-    process.exit(0);
+    // 2. git root 検出
+    //    detectedGitRoot: 実際に検出できたか（null 可）を保持。ウィンドウタイトル生成に使う。
+    //    gitRoot:         ソケットパス算出・相対パス計算用に fallback を含んだ値。
+    detectedGitRoot = findGitRoot(startup.filePath);
+    gitRoot = detectedGitRoot ?? path.dirname(startup.filePath);
+    log("git_root_detected", {
+      gitRoot,
+      filePath: startup.filePath,
+      detected: detectedGitRoot !== null,
+    });
+
+    // 3. ソケットパス算出
+    ipcSocketPath = getSocketPath(gitRoot);
+
+    // 4. 既存プロセスへの委譲を試みる
+    const delegated = await sendFileToExistingProcess(ipcSocketPath, startup.filePath);
+    if (delegated) {
+      log("file_delegated", { path: startup.filePath, gitRoot });
+      console.log(
+        `[mado] 既存ウィンドウにファイルを送信しました: ${path.basename(startup.filePath)}`,
+      );
+      process.exit(0);
+    }
+  } else {
+    log("cli_parsed", { source: "none", mode: "welcome" });
   }
 
-  // 5. ファイルリスト状態の初期化（初期ファイルを 1 件追加）
+  // 5. ファイルリスト状態の初期化
   let state: FileListState = createEmptyState();
   let watcher: FileWatcher | null = null;
   let wsServer: WsServer | null = null;
 
-  /** 絶対パスから FileListEntry を構築する */
-  function buildEntry(absPath: string): FileListEntry {
+  /**
+   * 絶対パスから FileListEntry を構築する。
+   *
+   * welcome→file 遷移の冪等性のため、gitRoot はクロージャではなく引数で受け取る
+   * (addFileToState 内で upgradeToFileMode を先に呼び、決定済みの gitRoot を渡す)。
+   */
+  function buildEntry(absPath: string, rootForRelative: string): FileListEntry {
     const abs = path.resolve(absPath);
-    const rel = toRelative(abs, gitRoot);
-    if (rel === path.basename(abs) && !abs.startsWith(gitRoot + path.sep) && abs !== gitRoot) {
+    const rel = toRelative(abs, rootForRelative);
+    if (
+      rel === path.basename(abs) &&
+      !abs.startsWith(rootForRelative + path.sep) &&
+      abs !== rootForRelative
+    ) {
       log("file_outside_git_root", { path: abs });
     }
     return { absolutePath: abs, relativePath: rel };
@@ -227,9 +265,9 @@ async function main(): Promise<void> {
     broadcastState();
   }
 
-  // 5a. 初期ファイルを state に追加
-  state = addFile(state, buildEntry(filePath));
-  {
+  // 5a. file mode のみ、初期ファイルを state に追加
+  if (!welcomeMode && initialFilePath !== null && gitRoot !== null) {
+    state = addFile(state, buildEntry(initialFilePath, gitRoot));
     const e = activeEntry(state);
     if (e) {
       log("file_list_added", {
@@ -322,19 +360,50 @@ async function main(): Promise<void> {
   }
 
   // 7. BrowserWindow を作成
-  // Window メニュー用に自前で作成済みウィンドウを追跡する。
+  // welcome モードでは activePath=null, gitRoot=null となり buildWindowTitle が "mado" を返す。
   const knownWindows: Array<{ id: number; title: string }> = [];
   const win = new BrowserWindow({
-    title: buildWindowTitle({ activePath: filePath, gitRoot: detectedGitRoot }),
+    title: buildWindowTitle({ activePath: initialFilePath, gitRoot: detectedGitRoot }),
     frame: { width: 900, height: 700, x: 0, y: 0 },
     url: "views://mainview/index.html",
   });
   knownWindows.push({ id: win.id, title: win.title });
   log("webview_state_changed", { state: "creating" });
+  if (welcomeMode) {
+    log("welcome_window_opened", { windowId: win.id });
+  }
+
+  /**
+   * welcome → file mode への遷移。最初のファイル追加時に 1 回だけ走る (冪等)。
+   * IPC server はここで初めて起動する (welcome 中はプロジェクト未確定のため listen しない)。
+   * detectedGitRoot も同時に更新するため、以降の updateWindowTitle() が適切なタイトルを出す。
+   */
+  function upgradeToFileMode(firstAbsPath: string): void {
+    const result = computeUpgradeToFileMode({
+      firstAbsPath,
+      welcomeMode,
+      findGitRoot,
+    });
+    if (result.kind === "noop") return;
+    detectedGitRoot = result.detectedGitRoot;
+    gitRoot = result.gitRoot;
+    ipcSocketPath = result.socketPath;
+    log("git_root_detected", {
+      gitRoot,
+      filePath: firstAbsPath,
+      detected: detectedGitRoot !== null,
+    });
+    ipcServer = startIpcServer(ipcSocketPath, (newFilePath) => {
+      addFileToState(newFilePath);
+    });
+    welcomeMode = false;
+    log("welcome_to_file_transition", { path: firstAbsPath, gitRoot });
+  }
 
   /**
    * 現在のアクティブファイル・検出 gitRoot からタイトルを算出してウィンドウに反映する。
-   * active が変化したタイミングでのみ呼ぶ（Hot Reload では不要）。
+   * active が変化したタイミングと welcome→file 遷移の直後に呼ぶ。
+   * detectedGitRoot は mutable で、welcome→file 遷移時に upgradeToFileMode が書き換える。
    */
   function updateWindowTitle(): void {
     const entry = activeEntry(state);
@@ -374,10 +443,19 @@ async function main(): Promise<void> {
   /**
    * 絶対パスを state に追加し、必要なら watcher 切替と WebView 再配信を行う。
    * IPC 受信経路とメニュー Open... 経路で共通利用する。
+   *
+   * 不変条件: upgradeToFileMode → buildEntry の順序 (gitRoot 確定後に相対パス計算)。
    */
   function addFileToState(newFilePath: string): void {
     try {
-      const entry = buildEntry(newFilePath);
+      // welcome モードの場合はここで gitRoot / IPC server を確定させる。
+      // 2 回目以降は no-op (冪等)。
+      upgradeToFileMode(newFilePath);
+      if (gitRoot === null) {
+        // upgradeToFileMode が正しく走れば到達不能だが、型的な保険。
+        throw new Error("gitRoot が確定していません");
+      }
+      const entry = buildEntry(newFilePath, gitRoot);
       const before = state.files.length;
       const previous = activeEntry(state);
       state = addFile(state, entry);
@@ -416,10 +494,12 @@ async function main(): Promise<void> {
     }
   }
 
-  // 10. IPC サーバー起動（2 回目以降の起動からファイルパスを受信）
-  const ipcServer = startIpcServer(socketPath, (newFilePath) => {
-    addFileToState(newFilePath);
-  });
+  // 10. IPC サーバー起動（file mode のみ。welcome→file 遷移時は upgradeToFileMode が起動する）
+  if (!welcomeMode && ipcSocketPath !== null) {
+    ipcServer = startIpcServer(ipcSocketPath, (newFilePath) => {
+      addFileToState(newFilePath);
+    });
+  }
 
   // 10b. macOS アプリケーションメニューをインストール
   //
@@ -461,7 +541,9 @@ async function main(): Promise<void> {
     if (wsServer) {
       wsServer.stop();
     }
-    stopIpcServer(ipcServer, socketPath);
+    if (ipcServer !== null && ipcSocketPath !== null) {
+      stopIpcServer(ipcServer, ipcSocketPath);
+    }
     const last = activeEntry(state);
     if (last) {
       log("file_closed", { path: last.absolutePath });

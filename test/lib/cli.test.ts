@@ -4,7 +4,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { parseCliArgs } from "../../src/lib/cli";
-import type { CliArgsOk, CliArgsError } from "../../src/lib/cli";
+import type { CliArgsFileOk, CliArgsWelcome, CliArgsError } from "../../src/lib/cli";
 import * as path from "node:path";
 
 describe("parseCliArgs", () => {
@@ -12,8 +12,11 @@ describe("parseCliArgs", () => {
     // README.md は worktree のルートに存在する
     const result = parseCliArgs(["node", "mado", "README.md"]);
     expect(result.ok).toBe(true);
-    const ok = result as CliArgsOk;
+    if (!result.ok) return;
+    expect(result.mode).toBe("file");
+    const ok = result as CliArgsFileOk;
     expect(ok.filePath).toBe(path.resolve("README.md"));
+    expect(ok.source).toBe("argv");
     expect(ok.warnings).toHaveLength(0);
   });
 
@@ -24,18 +27,22 @@ describe("parseCliArgs", () => {
     expect(err.error).toContain("ファイルが見つかりません");
   });
 
-  test("引数なしで README.md をデフォルトにする", () => {
-    const result = parseCliArgs(["node", "mado"]);
+  test("argv も env も無ければ welcome mode を返す", () => {
+    const result = parseCliArgs(["node", "mado"], {});
     expect(result.ok).toBe(true);
-    const ok = result as CliArgsOk;
-    expect(ok.filePath).toBe(path.resolve("README.md"));
+    if (!result.ok) return;
+    expect(result.mode).toBe("welcome");
+    const welcome = result as CliArgsWelcome;
+    expect(welcome.mode).toBe("welcome");
   });
 
   test("Markdown 以外の拡張子は警告つきで受け付ける", () => {
     // package.json は存在するが .md ではない
     const result = parseCliArgs(["node", "mado", "package.json"]);
     expect(result.ok).toBe(true);
-    const ok = result as CliArgsOk;
+    if (!result.ok) return;
+    expect(result.mode).toBe("file");
+    const ok = result as CliArgsFileOk;
     expect(ok.warnings.length).toBeGreaterThan(0);
     expect(ok.warnings[0]).toContain("Markdown ファイルではない可能性があります");
   });
@@ -44,41 +51,37 @@ describe("parseCliArgs", () => {
     const absPath = path.resolve("README.md");
     const result = parseCliArgs(["node", "mado", absPath]);
     expect(result.ok).toBe(true);
-    const ok = result as CliArgsOk;
+    if (!result.ok) return;
+    const ok = result as CliArgsFileOk;
     expect(ok.filePath).toBe(absPath);
   });
 
-  test(".markdown 拡張子も Markdown として認識する", () => {
-    // .markdown ファイルが存在しないためスキップ（存在チェックで先にエラーになる）
-    // このテストは拡張子チェックロジックの動作を確認する
-    const result = parseCliArgs(["node", "mado", "README.md"]);
-    expect(result.ok).toBe(true);
-    const ok = result as CliArgsOk;
-    expect(ok.warnings).toHaveLength(0);
-  });
-
   test("argv が無ければ MADO_FILE 環境変数を読む", () => {
-    // env に docs/seed.md の絶対パスを入れて、argv 無しで env 経由で拾われることを確認
     const env = { MADO_FILE: path.resolve("docs/seed.md") };
     const result = parseCliArgs(["node", "mado"], env);
     expect(result.ok).toBe(true);
-    const ok = result as CliArgsOk;
+    if (!result.ok) return;
+    expect(result.mode).toBe("file");
+    const ok = result as CliArgsFileOk;
     expect(ok.filePath).toBe(path.resolve("docs/seed.md"));
+    expect(ok.source).toBe("env");
   });
 
   test("argv が指定された場合は MADO_FILE より argv を優先する", () => {
-    // env は無関係なパス（存在しなくても argv が優先される）
     const env = { MADO_FILE: path.resolve("docs/seed.md") };
     const result = parseCliArgs(["node", "mado", "README.md"], env);
     expect(result.ok).toBe(true);
-    const ok = result as CliArgsOk;
+    if (!result.ok) return;
+    const ok = result as CliArgsFileOk;
     expect(ok.filePath).toBe(path.resolve("README.md"));
+    expect(ok.source).toBe("argv");
   });
 
-  test("argv も env も無ければ README.md にフォールバック", () => {
-    const result = parseCliArgs(["node", "mado"], {});
-    expect(result.ok).toBe(true);
-    const ok = result as CliArgsOk;
-    expect(ok.filePath).toBe(path.resolve("README.md"));
+  test("env.MADO_FILE が指定されたが不在ならエラーを返す", () => {
+    const env = { MADO_FILE: path.resolve("nonexistent-from-env.md") };
+    const result = parseCliArgs(["node", "mado"], env);
+    expect(result.ok).toBe(false);
+    const err = result as CliArgsError;
+    expect(err.error).toContain("ファイルが見つかりません");
   });
 });
