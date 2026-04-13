@@ -32,6 +32,7 @@ import {
   toRelative,
 } from "../lib/file-list";
 import type { FileListEntry, FileListState } from "../lib/file-list";
+import { buildWindowTitle } from "../lib/window-title";
 
 /**
  * Markdown ファイルを読み込む。失敗時はフォールバックコンテンツを返す。
@@ -111,8 +112,11 @@ async function main(): Promise<void> {
   warnings.forEach((w) => console.warn(`[mado] ${w}`));
 
   // 2. git root 検出
-  const gitRoot = findGitRoot(filePath) ?? path.dirname(filePath);
-  log("git_root_detected", { gitRoot, filePath });
+  //    detectedGitRoot: 実際に検出できたか（null 可）を保持。ウィンドウタイトル生成に使う。
+  //    gitRoot:         ソケットパス算出・相対パス計算用に fallback を含んだ値。
+  const detectedGitRoot = findGitRoot(filePath);
+  const gitRoot = detectedGitRoot ?? path.dirname(filePath);
+  log("git_root_detected", { gitRoot, filePath, detected: detectedGitRoot !== null });
 
   // 3. ソケットパス算出
   const socketPath = getSocketPath(gitRoot);
@@ -265,6 +269,7 @@ async function main(): Promise<void> {
           to: target,
         });
         syncWatcherToActive();
+        updateWindowTitle();
       }
       broadcastState();
       return;
@@ -296,6 +301,7 @@ async function main(): Promise<void> {
           }
           log("file_list_empty", {});
         }
+        updateWindowTitle();
       }
       broadcastState();
       return;
@@ -304,11 +310,25 @@ async function main(): Promise<void> {
 
   // 7. BrowserWindow を作成
   const win = new BrowserWindow({
-    title: `mado — ${path.basename(filePath)}`,
+    title: buildWindowTitle({ activePath: filePath, gitRoot: detectedGitRoot }),
     frame: { width: 900, height: 700, x: 0, y: 0 },
     url: "views://mainview/index.html",
   });
   log("webview_state_changed", { state: "creating" });
+
+  /**
+   * 現在のアクティブファイル・検出 gitRoot からタイトルを算出してウィンドウに反映する。
+   * active が変化したタイミングでのみ呼ぶ（Hot Reload では不要）。
+   */
+  function updateWindowTitle(): void {
+    const entry = activeEntry(state);
+    const title = buildWindowTitle({
+      activePath: entry?.absolutePath ?? null,
+      gitRoot: detectedGitRoot,
+    });
+    win.setTitle(title);
+    log("window_title_updated", { title });
+  }
 
   // 8. DOM 準備完了後の処理（WebSocket 接続を促す。state は client の "ready" で配信）
   win.webview.on("dom-ready", () => {
@@ -361,6 +381,7 @@ async function main(): Promise<void> {
           to: nextActive?.absolutePath ?? "",
         });
         syncWatcherToActive();
+        updateWindowTitle();
       }
 
       broadcastState();
