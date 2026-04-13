@@ -359,11 +359,49 @@ function connectWebSocket(port: number): void {
   connect();
 }
 
+// --- サイドバー アコーディオン動作 ---
+
+/** トリガー元 (ログ目的) */
+type ToggleSource = "keydown" | "menu" | "api";
+
+/** サイドバーの開閉状態 (初期値は開) */
+let sidebarOpen = true;
+
+/**
+ * サイドバーの開閉をトグルする。
+ *
+ * `#app` の `data-sidebar` 属性と `#sidebar` の `aria-hidden` を同期させ、
+ * 状態遷移イベントを WebView console にログする。
+ */
+function toggleSidebar(source: ToggleSource): void {
+  const appEl = document.getElementById("app");
+  const sidebarEl = document.getElementById("sidebar");
+  if (!appEl || !sidebarEl) return;
+
+  sidebarOpen = !sidebarOpen;
+  const nextState = sidebarOpen ? "open" : "closed";
+  appEl.setAttribute("data-sidebar", nextState);
+  sidebarEl.setAttribute("aria-hidden", sidebarOpen ? "false" : "true");
+
+  const event = sidebarOpen ? "sidebar_opened" : "sidebar_closed";
+  console.log(`[mado] ${event} source=${source}`);
+}
+
+// WebView 内キーボードショートカット: ⌘⌥S (メニュー未実装環境での補助)
+document.addEventListener("keydown", (ev: KeyboardEvent) => {
+  if (ev.metaKey && ev.altKey && ev.code === "KeyS") {
+    ev.preventDefault();
+    toggleSidebar("keydown");
+  }
+});
+
 // --- グローバル関数として公開 ---
 
 declare global {
   interface Window {
     __MADO_WS_CONNECT__: (port: number) => void;
+    /** View メニュー (⌘⌥S) から executeJavascript で呼び出される toggle 関数 */
+    __MADO_TOGGLE_SIDEBAR__: () => void;
     /** Electrobun のプリロードが提供する host-message 送信関数 */
     __electrobunSendToHost?: (data: unknown) => void;
   }
@@ -376,6 +414,10 @@ window.__MADO_WS_CONNECT__ = (port: number): void => {
   if (wsConnected) return;
   wsConnected = true;
   connectWebSocket(port);
+};
+
+window.__MADO_TOGGLE_SIDEBAR__ = (): void => {
+  toggleSidebar("menu");
 };
 
 console.log("[mado] renderer_started");

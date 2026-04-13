@@ -26,6 +26,7 @@
       grid-template-columns: 240px 1fr;
       height: 100vh;
       overflow: hidden;
+      transition: grid-template-columns 200ms ease-in-out;
     }
 
     /* サイドバー */
@@ -35,6 +36,27 @@
       overflow-y: auto;
       height: 100vh;
       box-sizing: border-box;
+      transform: translateX(0);
+      transition: transform 200ms ease-in-out;
+      transform-origin: left;
+    }
+
+    /* アコーディオン閉時: grid 列を 0 にして sidebar を画面外へ */
+    #app[data-sidebar="closed"] {
+      grid-template-columns: 0 1fr;
+    }
+
+    #app[data-sidebar="closed"] #sidebar {
+      transform: translateX(-100%);
+      overflow: hidden;
+    }
+
+    /* 視差を減らす設定: アニメーションを無効化 */
+    @media (prefers-reduced-motion: reduce) {
+      #app,
+      #sidebar {
+        transition: none;
+      }
     }
 
     #file-list {
@@ -188,8 +210,8 @@
   </style>
 </head>
 <body>
-  <div id="app">
-    <aside id="sidebar">
+  <div id="app" data-sidebar="open">
+    <aside id="sidebar" aria-label="ファイルリスト">
       <ul id="file-list"></ul>
     </aside>
     <main id="main">
