@@ -14,6 +14,7 @@
 mado README.md          # ファイルを開く（変更を検知して自動リロード）
 mado https://...        # URL を開く
 mado render file.md     # PNG として書き出す（AI へ渡す用）
+mado                    # 引数なし / Finder / Launchpad → ウェルカムウィンドウ (⌘O で開く)
 ```
 
 ---

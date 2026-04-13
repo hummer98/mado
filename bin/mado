@@ -17,15 +17,16 @@ if [ ! -x "$LAUNCHER" ]; then
   exit 1
 fi
 
+# 引数がある場合のみ MADO_FILE をエクスポートする。
+# 引数が無ければ MADO_FILE は未設定のまま launcher を起動し、
+# bun 側では welcome モード (Task 020) で起動する。
 if [ -n "${1:-}" ]; then
   if [[ "$1" = /* ]]; then
     MADO_FILE="$1"
   else
     MADO_FILE="$(pwd)/$1"
   fi
-else
-  MADO_FILE="$(pwd)/README.md"
+  export MADO_FILE
 fi
-export MADO_FILE
 
 exec "$LAUNCHER"

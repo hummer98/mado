@@ -21,17 +21,26 @@ const CliArgsSchema = z.object({
  * ファイルパスの由来を示す Zod enum。
  * - argv: コマンドライン引数から取得
  * - env: 環境変数 MADO_FILE から取得
- * - default: デフォルト値 "README.md"
+ *
+ * 引数も env も無い場合は welcome モードとして扱い source は持たない
+ * (Task 020 で "default" 由来を除外)。
  */
-export const CliPathSourceSchema = z.enum(["argv", "env", "default"]);
+export const CliPathSourceSchema = z.enum(["argv", "env"]);
 export type CliPathSource = z.infer<typeof CliPathSourceSchema>;
 
-/** パース成功時の結果 */
-export type CliArgsOk = {
+/** ファイルモード (argv / env でパスが確定した場合) */
+export type CliArgsFileOk = {
   ok: true;
+  mode: "file";
   filePath: string;
   source: CliPathSource;
   warnings: string[];
+};
+
+/** welcome モード (引数も env も与えられなかった場合) */
+export type CliArgsWelcome = {
+  ok: true;
+  mode: "welcome";
 };
 
 /** パース失敗時の結果 */
@@ -41,12 +50,12 @@ export type CliArgsError = {
 };
 
 /** CLI 引数パース結果 */
-export type ParseResult = CliArgsOk | CliArgsError;
+export type ParseResult = CliArgsFileOk | CliArgsWelcome | CliArgsError;
 
 /**
  * CLI 引数をパースしてバリデーションする。
  *
- * 優先順位: argv[2] > env.MADO_FILE > デフォルト "README.md"
+ * 優先順位: argv[2] > env.MADO_FILE。どちらもなければ welcome モード。
  *
  * launcher は引数を forwarding しないため、env 経由で渡されるケースをサポートする。
  * env 由来の相対パスも `path.resolve()` で正規化するが、launcher の cwd は
@@ -55,7 +64,7 @@ export type ParseResult = CliArgsOk | CliArgsError;
  *
  * @param argv - process.argv 相当の配列
  * @param env - 環境変数オブジェクト（テスト容易性のため注入可能）
- * @returns パース結果（成功: ファイルパス + 由来 + 警告、失敗: エラーメッセージ）
+ * @returns パース結果（file モード / welcome モード / エラー）
  */
 export function parseCliArgs(
   argv: string[],
@@ -73,8 +82,8 @@ export function parseCliArgs(
     rawPath = env.MADO_FILE;
     source = "env";
   } else {
-    rawPath = "README.md";
-    source = "default";
+    // 引数も env も無い → Finder / Launchpad 起動 or launcher 無し CLI
+    return { ok: true, mode: "welcome" };
   }
 
   const filePath = path.resolve(rawPath);
@@ -96,5 +105,5 @@ export function parseCliArgs(
     warnings.push(`Markdown ファイルではない可能性があります (${ext})`);
   }
 
-  return { ok: true, filePath, source, warnings };
+  return { ok: true, mode: "file", filePath, source, warnings };
 }
