@@ -25,11 +25,22 @@
 
 ## Install
 
-> Note: mado is not yet published to a registry. For now, clone and build from source (see Development). The command below will work once published.
+Install via Homebrew Cask (macOS on Apple Silicon):
 
 ```bash
-bun install -g mado
+brew install --cask hummer98/mado/mado
 ```
+
+This installs `mado.app` into `/Applications` and the `mado` CLI into `$(brew --prefix)/bin`.
+
+> mado is currently unsigned. If macOS Gatekeeper blocks the first launch, run:
+> `xattr -dr com.apple.quarantine /Applications/mado.app`
+
+For source builds, see [Development](#development) below.
+
+### Manual install (without Homebrew)
+
+Download `mado-v*-macos-arm64.zip` from the [Releases](https://github.com/hummer98/mado/releases) page, unzip `mado.app` into `/Applications`, and add a shell wrapper to your `PATH` that exports `MADO_FILE` before `exec`ing `/Applications/mado.app/Contents/MacOS/launcher`. See [`bin/mado`](./bin/mado) for reference.
 
 ## Usage
 
