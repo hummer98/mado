@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `bin/mado <file>` was falling back to `README.md` on stale builds because the
+  launcher doesn't forward argv; the current source already reads `MADO_FILE`
+  correctly. Added a permanent `startup_invocation` diagnostic log (argv / cwd /
+  env_MADO_FILE) so the same symptom can be triaged in one line next time.
+  Re-run `bun run build:dev` on any checkout that still exhibits the old
+  behavior. (T025)
+
 ## [0.0.2] - 2026-04-13
 
 ### Added
