@@ -33,6 +33,14 @@ brew install --cask hummer98/mado/mado
 
 This installs `mado.app` into `/Applications` and the `mado` CLI into `$(brew --prefix)/bin`.
 
+To upgrade an existing install:
+
+```bash
+brew update && brew upgrade --cask mado
+```
+
+Cask releases are auto-updated by GitHub Actions when a new version is published.
+
 > mado is currently unsigned. If macOS Gatekeeper blocks the first launch, run:
 > `xattr -dr com.apple.quarantine /Applications/mado.app`
 
