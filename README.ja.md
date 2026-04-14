@@ -25,11 +25,22 @@
 
 ## インストール
 
-> 注: 現時点では registry へ未公開です。ソースから clone & build してください (Development 参照)。下記コマンドは公開後に利用可能になります。
+Homebrew Cask 経由でインストールします (macOS Apple Silicon)。
 
 ```bash
-bun install -g mado
+brew install --cask hummer98/mado/mado
 ```
+
+`/Applications/mado.app` と `$(brew --prefix)/bin/mado` (CLI) が配置されます。
+
+> 現時点で mado は署名されていません。macOS Gatekeeper が初回起動を弾く場合は以下を実行してください:
+> `xattr -dr com.apple.quarantine /Applications/mado.app`
+
+ソースからビルドする場合は下記の [Development](#development) セクションを参照してください。
+
+### 手動インストール (Homebrew を使わない場合)
+
+[Releases](https://github.com/hummer98/mado/releases) から `mado-v*-macos-arm64.zip` をダウンロードし、`mado.app` を `/Applications` に配置した上で、`MADO_FILE` 環境変数を設定して `/Applications/mado.app/Contents/MacOS/launcher` を `exec` するシェルラッパーを `PATH` に通してください ([`bin/mado`](./bin/mado) が参考になります)。
 
 ## 使い方
 
