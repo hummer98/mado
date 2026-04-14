@@ -33,6 +33,14 @@ brew install --cask hummer98/mado/mado
 
 `/Applications/mado.app` と `$(brew --prefix)/bin/mado` (CLI) が配置されます。
 
+既存のインストールを更新する場合:
+
+```bash
+brew update && brew upgrade --cask mado
+```
+
+新バージョンがリリースされると GitHub Actions が Cask を自動更新します。
+
 > 現時点で mado は署名されていません。macOS Gatekeeper が初回起動を弾く場合は以下を実行してください:
 > `xattr -dr com.apple.quarantine /Applications/mado.app`
 

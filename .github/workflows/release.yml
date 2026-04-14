@@ -1,0 +1,122 @@
+name: Update Homebrew Cask on Release
+
+# Release published イベントで起動し、hummer98/homebrew-mado の
+# Casks/mado.rb を自動更新する。Casks/mado.rb の現物は mado 本体には
+# 存在せず、workflow 実行時に actions/checkout で tap リポジトリを
+# clone してから sed で書き換える。詳細は docs/release-automation.md を参照。
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.0.3)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-homebrew-cask
+  cancel-in-progress: false
+
+jobs:
+  update-cask:
+    # prerelease / draft は自動更新対象外。workflow_dispatch は常に許可。
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.release.prerelease == false && github.event.release.draft == false)
+    runs-on: macos-latest
+    steps:
+      - name: Resolve release tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="${RELEASE_TAG:-$INPUT_TAG}"
+          if [ -z "$TAG" ]; then
+            echo "::error::No tag resolved (release.tag_name / inputs.tag both empty)"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch zip asset URL
+        id: asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          URL=$(gh release view "$TAG" \
+            --repo "$REPO" \
+            --json assets \
+            --jq '.assets[] | select(.name|endswith("-macos-arm64.zip")) | .url')
+          if [ -z "$URL" ]; then
+            echo "::error::No macos-arm64.zip asset found for $TAG"
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Download & hash
+        id: hash
+        env:
+          ASSET_URL: ${{ steps.asset.outputs.url }}
+        run: |
+          curl -fL --retry 3 --retry-delay 5 -o mado.zip "$ASSET_URL"
+          if [ ! -s mado.zip ]; then
+            echo "::error::Downloaded mado.zip is empty"
+            exit 1
+          fi
+          SHA=$(shasum -a 256 mado.zip | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: hummer98/homebrew-mado
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update Casks/mado.rb
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
+          # version 行と sha256 行を置換。url 行は `v#{version}` 補間のため置換不要。
+          sed -i '' -E "s/^(  version )\"[^\"]+\"/\1\"$VERSION\"/" Casks/mado.rb
+          sed -i '' -E "s/^(  sha256 )\"[0-9a-f]{64}\"/\1\"$SHA256\"/" Casks/mado.rb
+
+      - name: Verify changes
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
+          git diff Casks/mado.rb
+          grep -q "version \"$VERSION\"" Casks/mado.rb \
+            || { echo "::error::version update failed"; exit 1; }
+          grep -q "sha256 \"$SHA256\"" Casks/mado.rb \
+            || { echo "::error::sha256 update failed"; exit 1; }
+          # url 行が新 tag を参照していることも確認（v#{version} 補間の健全性担保）
+          grep -q "v$VERSION" Casks/mado.rb \
+            || { echo "::error::url/version reference not found in Casks/mado.rb"; exit 1; }
+
+      - name: Commit & push
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Casks/mado.rb
+          if git diff --cached --quiet; then
+            echo "No changes (already up-to-date)"
+            exit 0
+          fi
+          git commit -m "chore: bump mado to v$VERSION"
+          git push
