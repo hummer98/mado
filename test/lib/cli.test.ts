@@ -28,6 +28,9 @@ describe("parseCliArgs", () => {
   });
 
   test("argv も env も無ければ welcome mode を返す", () => {
+    // T025 退行防止: 旧ビルドに残存していた `rawPath = "README.md"` フォールバック
+    // (launcher の cwd=Contents/MacOS/ で path.resolve して「ファイルが見つかりません」
+    // になる問題) が復活しないことを固定化する。
     const result = parseCliArgs(["node", "mado"], {});
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -83,5 +86,39 @@ describe("parseCliArgs", () => {
     expect(result.ok).toBe(false);
     const err = result as CliArgsError;
     expect(err.error).toContain("ファイルが見つかりません");
+  });
+
+  test("argv なし + env に相対パスの .md → file, env, cwd 基準で resolve される", () => {
+    // T025: launcher が argv を forwarding しない環境で、bin/mado ラッパが相対パスを
+    // そのまま MADO_FILE に入れて渡してきた場合でも正しく開けること。
+    const env = { MADO_FILE: "docs/seed.md" };
+    const result = parseCliArgs(["node", "mado"], env);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mode).toBe("file");
+    const ok = result as CliArgsFileOk;
+    expect(ok.source).toBe("env");
+    expect(ok.filePath).toBe(path.resolve("docs/seed.md"));
+  });
+
+  test("argv なし + env に絶対パスの .md → file, env, そのパス", () => {
+    // T025: bin/mado ラッパが絶対パス化した MADO_FILE を渡してくる通常系。
+    const absPath = path.resolve("docs/seed.md");
+    const env = { MADO_FILE: absPath };
+    const result = parseCliArgs(["node", "mado"], env);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mode).toBe("file");
+    const ok = result as CliArgsFileOk;
+    expect(ok.source).toBe("env");
+    expect(ok.filePath).toBe(absPath);
+  });
+
+  test("env.MADO_FILE が空文字列なら welcome mode を返す", () => {
+    // cli.ts の `env.MADO_FILE.length > 0` 条件を固定化する。
+    const result = parseCliArgs(["node", "mado"], { MADO_FILE: "" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mode).toBe("welcome");
   });
 });

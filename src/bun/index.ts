@@ -171,6 +171,13 @@ async function main(): Promise<void> {
   // ログ初期化
   initLogger();
   log("app_started", { version: "0.0.1" });
+  // 起動時診断ログ: launcher 経由で bun に何が届いているかを事実として残す。
+  // 引数・env・cwd のいずれが優先されたかを後から追跡できるよう恒久化する。
+  log("startup_invocation", {
+    argv: JSON.stringify(process.argv),
+    cwd: process.cwd(),
+    env_MADO_FILE: process.env.MADO_FILE ?? "null",
+  });
 
   // 1. CLI 引数パース → 起動モード決定
   const parseResult = parseCliArgs(process.argv);
