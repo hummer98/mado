@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import type net from "node:net";
 import { parseCliArgs } from "../lib/cli";
+import { listMarkdownFiles } from "../lib/markdown-discovery";
 import { findGitRoot } from "../lib/git-root";
 import { getSocketPath } from "../lib/socket-path";
 import { sendFileToExistingProcess } from "../lib/ipc-client";
@@ -171,23 +172,27 @@ async function main(): Promise<void> {
   // ログ初期化
   initLogger();
   log("app_started", { version: "0.0.1" });
-  // 起動時診断ログ: launcher 経由で bun に何が届いているかを事実として残す。
-  // 引数・env・cwd のいずれが優先されたかを後から追跡できるよう恒久化する。
-  log("startup_invocation", {
-    argv: JSON.stringify(process.argv),
-    cwd: process.cwd(),
-    env_MADO_FILE: process.env.MADO_FILE ?? "null",
-  });
 
   // 1. CLI 引数パース → 起動モード決定
   const parseResult = parseCliArgs(process.argv);
   const startup = decideStartupMode(parseResult);
+
+  // 起動時診断ログ: launcher 経由で bun に何が届いているかを事実として残す。
+  // 引数・env・cwd のいずれが優先されたかを後から追跡できるよう恒久化する。
+  // target_type は startup.kind (file | directory | welcome | error) を記録。
+  log("startup_invocation", {
+    argv: JSON.stringify(process.argv),
+    cwd: process.cwd(),
+    env_MADO_FILE: process.env.MADO_FILE ?? "null",
+    target_type: startup.kind,
+  });
+
   if (startup.kind === "error") {
     console.error(`[mado] エラー: ${startup.message}`);
     process.exit(1);
   }
 
-  // welcome か file かで初期化の仕方を切り替える。
+  // welcome / file / directory で初期化の仕方を切り替える。
   // 共通: gitRoot / detectedGitRoot / ipcServer / socketPath は mutable 化し、
   // welcome → file 遷移時に upgradeToFileMode() で確定する。
   let welcomeMode = startup.kind === "welcome";
@@ -195,8 +200,11 @@ async function main(): Promise<void> {
   let gitRoot: string | null = null;
   let ipcServer: net.Server | null = null;
   let ipcSocketPath: string | null = null;
-  const initialFilePath: string | null =
-    startup.kind === "file" ? startup.filePath : null;
+
+  // 起動時に state に登録するファイル列 (file は単一、welcome は空、directory は列挙結果)。
+  let initialFiles: string[] = [];
+  // ウィンドウタイトル・初期描画のベースとなるアクティブファイル。
+  let activePath: string | null = null;
 
   if (startup.kind === "file") {
     // file mode: 既存挙動。CLI 引数 / env.MADO_FILE で明示されたファイルを開く。
@@ -228,6 +236,73 @@ async function main(): Promise<void> {
       );
       process.exit(0);
     }
+
+    initialFiles = [startup.filePath];
+    activePath = startup.filePath;
+  } else if (startup.kind === "directory") {
+    // directory mode: 配下の Markdown を列挙して state に一括登録する。
+    if (parseResult.ok && parseResult.mode === "directory") {
+      log("cli_parsed", {
+        source: parseResult.source,
+        dirPath: parseResult.dirPath,
+        recursive: parseResult.recursive,
+      });
+      parseResult.warnings.forEach((w) => console.warn(`[mado] ${w}`));
+    }
+
+    const discovery = listMarkdownFiles(startup.dirPath, {
+      recursive: startup.recursive,
+    });
+    log("file_list_built", {
+      count: discovery.files.length,
+      recursive: startup.recursive,
+      dir: startup.dirPath,
+      excluded: discovery.excludedDirs.length,
+      errors: discovery.errors.length,
+    });
+    for (const e of discovery.errors) {
+      log("file_discovery_error", { message: e.message, path: e.path });
+    }
+
+    if (discovery.files.length === 0) {
+      console.error(
+        `[mado] エラー: Markdown ファイルが見つかりませんでした: ${startup.dirPath}`,
+      );
+      if (!startup.recursive) {
+        console.error(
+          `[mado] ヒント: -r / --recursive でサブディレクトリも探索できます`,
+        );
+      }
+      process.exit(1);
+    }
+
+    // git root 検出は先頭ファイルを起点にする (file モードと同じヘルパを流用)。
+    detectedGitRoot = findGitRoot(discovery.files[0]);
+    gitRoot = detectedGitRoot ?? startup.dirPath;
+    log("git_root_detected", {
+      gitRoot,
+      filePath: discovery.files[0],
+      detected: detectedGitRoot !== null,
+    });
+
+    // ソケットパス算出
+    ipcSocketPath = getSocketPath(gitRoot);
+
+    // 既存プロセス委譲は先頭ファイルのみ送る (plan.md §要確認事項 #2)。
+    const delegated = await sendFileToExistingProcess(
+      ipcSocketPath,
+      discovery.files[0],
+    );
+    if (delegated) {
+      log("file_delegated", { path: discovery.files[0], gitRoot });
+      console.log(
+        `[mado] 既存ウィンドウにファイルを送信しました: ${path.basename(discovery.files[0])}`,
+      );
+      process.exit(0);
+    }
+
+    initialFiles = discovery.files;
+    activePath = discovery.files[0];
   } else {
     log("cli_parsed", { source: "none", mode: "welcome" });
   }
@@ -324,15 +399,24 @@ async function main(): Promise<void> {
     broadcastState();
   }
 
-  // 5a. file mode のみ、初期ファイルを state に追加
-  if (!welcomeMode && initialFilePath !== null && gitRoot !== null) {
-    state = addFile(state, buildEntry(initialFilePath, gitRoot));
+  // 5a. file / directory mode で初期ファイルを state に追加する。
+  // directory モードでは複数ファイルをループで追加するため、最後のファイルが
+  // addFile() によってアクティブ化されてしまう。activePath (= 先頭ファイル) で
+  // setActiveByPath を呼んでアクティブを戻す必要がある (plan.md §3 末尾の警告)。
+  if (!welcomeMode && initialFiles.length > 0 && gitRoot !== null) {
+    for (const p of initialFiles) {
+      state = addFile(state, buildEntry(p, gitRoot));
+    }
+    if (activePath !== null) {
+      state = setActiveByPath(state, path.resolve(activePath));
+    }
+    const total = state.files.length;
     const e = activeEntry(state);
     if (e) {
       log("file_list_added", {
         path: e.absolutePath,
         relativePath: e.relativePath,
-        total: state.files.length,
+        total,
       });
     }
   }
@@ -442,7 +526,7 @@ async function main(): Promise<void> {
   }
 
   const win = new BrowserWindow({
-    title: buildWindowTitle({ activePath: initialFilePath, gitRoot: detectedGitRoot }),
+    title: buildWindowTitle({ activePath, gitRoot: detectedGitRoot }),
     frame: {
       x: initialBounds.x,
       y: initialBounds.y,
