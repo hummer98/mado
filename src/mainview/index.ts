@@ -9,6 +9,7 @@ import { marked, type MarkedExtension } from "marked";
 import { gfmHeadingId } from "marked-gfm-heading-id";
 import hljs from "highlight.js";
 import mermaid from "mermaid";
+import { rewriteImageUrls } from "./rewrite-image-urls";
 
 // --- marked の設定 ---
 
@@ -96,6 +97,9 @@ function buildErrorBoxText(
   return `${top}\n${body}\n${bottom}`;
 }
 
+/** WS サーバーのポート番号（画像 URL 書き換えに使用） */
+let wsPort: number | null = null;
+
 /** 直前にレンダリングしたファイルパス（同一なら scroll 維持、別なら top に戻す） */
 let lastRenderedFilePath: string | null = null;
 
@@ -133,6 +137,10 @@ async function render(markdownText: string, filePath: string): Promise<void> {
   }
 
   contentEl.innerHTML = html;
+
+  if (wsPort !== null && filePath) {
+    rewriteImageUrls(contentEl, filePath, wsPort);
+  }
 
   const mermaidNodes = contentEl.querySelectorAll<HTMLElement>(".mermaid");
   const validNodes: HTMLElement[] = [];
@@ -299,6 +307,7 @@ function isStateMessage(data: unknown): data is ServerStateMessage {
  * 接続が切れた場合は指数バックオフで再接続を試みる。
  */
 function connectWebSocket(port: number): void {
+  wsPort = port;
   let retryCount = 0;
   const MAX_RETRIES = 5;
   const BASE_DELAY_MS = 500;

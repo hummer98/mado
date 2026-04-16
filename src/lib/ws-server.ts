@@ -7,6 +7,8 @@
  */
 
 import type { ServerWebSocket } from "bun";
+import { resolve as pathResolve } from "node:path";
+import { realpath } from "node:fs/promises";
 import { z } from "zod";
 import { log } from "./logger";
 import type { FileListEntry } from "./file-list";
@@ -47,6 +49,8 @@ export interface WsServer {
 export interface StartWsServerOptions {
   /** クライアントメッセージ受信ハンドラ。例外は呼び出し側で捕捉してください。 */
   onClientMessage?: (msg: ClientMessage) => void;
+  /** /_local/ で配信を許可するルートディレクトリ。getter 関数も可。 */
+  allowedRoot?: string | (() => string | null);
 }
 
 /**
@@ -60,6 +64,63 @@ export function startWsServer(options?: StartWsServerOptions): WsServer {
   // 接続中クライアントのセット
   const clients = new Set<ServerWebSocket<unknown>>();
   const onClientMessage = options?.onClientMessage;
+  const allowedRootOpt = options?.allowedRoot;
+
+  function resolveAllowedRoot(): string | null {
+    if (allowedRootOpt === undefined) return null;
+    if (typeof allowedRootOpt === "function") return allowedRootOpt();
+    return allowedRootOpt;
+  }
+
+  const LOCAL_PREFIX = "/_local/";
+
+  async function handleLocalFile(
+    pathname: string,
+  ): Promise<Response> {
+    const root = resolveAllowedRoot();
+    if (root === null) {
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    const rawPath = decodeURIComponent(pathname.slice(LOCAL_PREFIX.length - 1));
+    const normalizedPath = pathResolve(rawPath);
+    const normalizedRoot = pathResolve(root);
+
+    if (
+      !normalizedPath.startsWith(normalizedRoot + "/") &&
+      normalizedPath !== normalizedRoot
+    ) {
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    let realRequestedPath: string;
+    try {
+      realRequestedPath = await realpath(normalizedPath);
+    } catch {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    let realRoot: string;
+    try {
+      realRoot = await realpath(normalizedRoot);
+    } catch {
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    if (
+      !realRequestedPath.startsWith(realRoot + "/") &&
+      realRequestedPath !== realRoot
+    ) {
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    const file = Bun.file(realRequestedPath);
+    if (!(await file.exists())) {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    return new Response(file);
+  }
 
   const server = Bun.serve({
     port: 0, // ランダムポート
@@ -101,6 +162,12 @@ export function startWsServer(options?: StartWsServerOptions): WsServer {
     },
     fetch(req, server) {
       if (server.upgrade(req)) return;
+
+      const url = new URL(req.url);
+      if (req.method === "GET" && url.pathname.startsWith(LOCAL_PREFIX)) {
+        return handleLocalFile(url.pathname);
+      }
+
       return new Response("WebSocket only", { status: 426 });
     },
   });

@@ -339,6 +339,7 @@ async function main(): Promise<void> {
 
   // 6. WebSocket サーバー起動（クライアントメッセージで state 更新）
   wsServer = startWsServer({
+    allowedRoot: () => gitRoot,
     onClientMessage: (msg: ClientMessage) => {
       try {
         handleClientMessage(msg);
