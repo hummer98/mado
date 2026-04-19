@@ -240,10 +240,38 @@ function renderSidebar(files: FileListEntry[], activeIndex: number): void {
       sendClientMessage({ type: "remove-file", absolutePath: entry.absolutePath });
     });
 
+    // 右クリック（またはトラックパッド 2 本指タップ）でネイティブメニュー表示を要求。
+    // preventDefault しないと WebKit の既定メニュー（コピー / 検索 / リロード…）が出る。
+    li.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      sendToHost({
+        type: "show-entry-context-menu",
+        absolutePath: entry.absolutePath,
+        relativePath: entry.relativePath,
+      });
+    });
+
     li.appendChild(label);
     li.appendChild(close);
     list.appendChild(li);
   });
+}
+
+/**
+ * host (Bun 側) にメッセージを送信する。
+ * Electrobun プリロードが `window.__electrobunSendToHost` を注入する前に呼ばれた場合
+ * や送信に失敗した場合は警告ログのみ出して握りつぶさない。
+ */
+function sendToHost(data: unknown): void {
+  if (typeof window.__electrobunSendToHost !== "function") {
+    console.warn("[mado] __electrobunSendToHost not available");
+    return;
+  }
+  try {
+    window.__electrobunSendToHost(data);
+  } catch (err) {
+    console.error("[mado] sendToHost failed:", err);
+  }
 }
 
 /** 空状態の表示を切り替える */

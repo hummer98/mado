@@ -11,7 +11,7 @@
  * ファイルリストの状態は本プロセスで一元管理し、WebView 側は state メッセージを受け取って描画するだけ。
  */
 
-import Electrobun, { ApplicationMenu, BrowserWindow, Screen, Utils } from "electrobun/bun";
+import Electrobun, { ApplicationMenu, BrowserWindow, ContextMenu, Screen, Utils } from "electrobun/bun";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import type net from "node:net";
@@ -42,6 +42,7 @@ import { decideStartupMode } from "./startup";
 import { computeUpgradeToFileMode } from "../lib/upgrade-mode";
 import { installApplicationMenu } from "./menu";
 import type { WindowSummary } from "./menu";
+import { buildEntryContextMenu, installEntryContextMenu } from "./context-menu";
 import {
   DEFAULT_BOUNDS,
   clampBoundsToDisplays,
@@ -119,6 +120,64 @@ function clampWithDefaultDisplays(bounds: WindowBounds): WindowBounds {
     log("window_state_clamp_failed", { reason: String(err) });
   }
   return { ...DEFAULT_BOUNDS };
+}
+
+/**
+ * 外部入力の生値を host-message ハンドラ冒頭で記録する。
+ * CLAUDE.md §ロギングポリシーの「外部入力のパース前の生値」要件に対応する。
+ * 循環参照で JSON.stringify が throw しても String() でフォールバックする（M1）。
+ */
+function logHostMessageRaw(event: unknown): void {
+  let raw: string;
+  try {
+    raw = JSON.stringify(event).slice(0, 500);
+  } catch {
+    raw = String(event).slice(0, 500);
+  }
+  log("host_message_received", { event: raw });
+}
+
+/**
+ * host-message イベントから左ペイン右クリックメニュー表示要求を処理する。
+ * ペイロード形状: `{ type: "show-entry-context-menu", absolutePath: string, relativePath: string }`
+ *
+ * handleMermaidErrorEvent と同じ 3 段ガード（object → data プロパティ →
+ * data.type チェック）で型絞り込みし、自分の type 以外は早期 return する（M2）。
+ * 全体を try/catch で包むことで他ハンドラへの波及を防ぐ。
+ */
+function handleEntryContextMenuRequest(event: unknown): void {
+  try {
+    if (
+      typeof event !== "object" ||
+      event === null ||
+      !("data" in event) ||
+      typeof (event as Record<string, unknown>).data !== "object"
+    ) {
+      return;
+    }
+
+    const data = (event as Record<string, unknown>).data as Record<string, unknown>;
+
+    if (data.type !== "show-entry-context-menu") {
+      return;
+    }
+
+    const absolutePath = data.absolutePath;
+    const relativePath = data.relativePath;
+    if (
+      typeof absolutePath !== "string" ||
+      absolutePath === "" ||
+      typeof relativePath !== "string"
+    ) {
+      log("error", { message: "show-entry-context-menu: invalid payload" });
+      return;
+    }
+
+    log("entry_context_menu_requested", { absolutePath, relativePath });
+    ContextMenu.showContextMenu(buildEntryContextMenu(absolutePath, relativePath));
+  } catch (err) {
+    log("error", { message: `entry context menu request handling failed: ${String(err)}` });
+  }
 }
 
 /**
@@ -611,9 +670,14 @@ async function main(): Promise<void> {
     // ページ再読み込み時は client が再度 ready を送って state が再配信される
   });
 
-  // 9. Mermaid エラー通知の受信
+  // 9. host-message の受信
+  //
+  // 生値ログ → Mermaid エラー → エントリ右クリックメニュー要求 の順で呼ぶ。
+  // 各ハンドラは自分の type 以外は早期 return するため共存可能。
   win.on("host-message", (event: unknown) => {
+    logHostMessageRaw(event);
     handleMermaidErrorEvent(event);
+    handleEntryContextMenuRequest(event);
   });
 
   /**
@@ -692,6 +756,15 @@ async function main(): Promise<void> {
       }
     },
     openFileDialog: (opts) => Utils.openFileDialog(opts),
+  });
+
+  // 10b'. 左ペインファイルエントリ用コンテキストメニューをインストール
+  //       (installEntryContextMenu はプロセスあたり 1 回のみ呼ぶ)
+  installEntryContextMenu(ContextMenu, {
+    copyToClipboard: (text) => Utils.clipboardWriteText(text),
+    revealInFinder: (absPath) => Utils.showItemInFolder(absPath),
+    removeFromList: (absPath) =>
+      handleClientMessage({ type: "remove-file", absolutePath: absPath }),
   });
 
   // 10c. ウィンドウ状態の永続化 (T022)
