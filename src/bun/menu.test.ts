@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import {
   APP_MENU_LABEL,
   FILE_MENU_LABEL,
+  EDIT_MENU_LABEL,
   WINDOW_MENU_LABEL,
   FILE_OPEN_ACTION,
   FILE_OPEN_RECENT_ACTION,
@@ -58,15 +59,17 @@ function findByRole(items: MenuItem[], role: string): MenuItem | undefined {
 }
 
 describe("buildApplicationMenu", () => {
-  test("3 つのトップレベルメニュー (mado / File / Window) を返す", () => {
+  test("4 つのトップレベルメニュー (mado / File / Edit / Window) を返す", () => {
     const menu = buildApplicationMenu(makeDeps());
-    expect(menu).toHaveLength(3);
+    expect(menu).toHaveLength(4);
     assertNormal(menu[0]!);
     assertNormal(menu[1]!);
     assertNormal(menu[2]!);
+    assertNormal(menu[3]!);
     expect((menu[0] as { label?: string }).label).toBe(APP_MENU_LABEL);
     expect((menu[1] as { label?: string }).label).toBe(FILE_MENU_LABEL);
-    expect((menu[2] as { label?: string }).label).toBe(WINDOW_MENU_LABEL);
+    expect((menu[2] as { label?: string }).label).toBe(EDIT_MENU_LABEL);
+    expect((menu[3] as { label?: string }).label).toBe(WINDOW_MENU_LABEL);
   });
 
   test("Application メニューに role:quit + Cmd+Q accelerator がある", () => {
@@ -134,7 +137,7 @@ describe("buildApplicationMenu", () => {
 
   test("Window メニューに minimize / zoom / bringAllToFront の role が含まれる", () => {
     const menu = buildApplicationMenu(makeDeps());
-    const win = menu[2] as { submenu?: MenuItem[] };
+    const win = menu[3] as { submenu?: MenuItem[] };
     const minimize = findByRole(win.submenu!, "minimize");
     expect(minimize).toBeDefined();
     expect((minimize as { accelerator?: string }).accelerator).toBe(ACCELERATOR_MINIMIZE);
@@ -150,7 +153,7 @@ describe("buildApplicationMenu", () => {
       ],
     });
     const menu = buildApplicationMenu(deps);
-    const win = menu[2] as { submenu?: MenuItem[] };
+    const win = menu[3] as { submenu?: MenuItem[] };
     const sub = win.submenu!;
     const dynamicItems = sub.filter(
       (i) => (i as { action?: string }).action === WINDOW_FOCUS_ACTION,
@@ -166,11 +169,64 @@ describe("buildApplicationMenu", () => {
 
   test("listWindows() が 0 件なら動的項目は展開されない", () => {
     const menu = buildApplicationMenu(makeDeps());
-    const win = menu[2] as { submenu?: MenuItem[] };
+    const win = menu[3] as { submenu?: MenuItem[] };
     const dynamicItems = win.submenu!.filter(
       (i) => (i as { action?: string }).action === WINDOW_FOCUS_ACTION,
     );
     expect(dynamicItems).toHaveLength(0);
+  });
+});
+
+describe("buildApplicationMenu > Edit メニュー", () => {
+  test("Edit メニューは menu[2] に存在し EDIT_MENU_LABEL を持つ", () => {
+    const menu = buildApplicationMenu(makeDeps());
+    const edit = menu[2] as { label?: string; submenu?: MenuItem[] };
+    expect(edit.label).toBe(EDIT_MENU_LABEL);
+    expect(edit.submenu).toBeDefined();
+  });
+
+  test("Edit submenu に copy / paste / selectAll の role が含まれる", () => {
+    const menu = buildApplicationMenu(makeDeps());
+    const edit = menu[2] as { submenu?: MenuItem[] };
+    expect(findByRole(edit.submenu!, "copy")).toBeDefined();
+    expect(findByRole(edit.submenu!, "paste")).toBeDefined();
+    expect(findByRole(edit.submenu!, "selectAll")).toBeDefined();
+  });
+
+  test("Edit submenu に cut / undo / redo の role が含まれる", () => {
+    const menu = buildApplicationMenu(makeDeps());
+    const edit = menu[2] as { submenu?: MenuItem[] };
+    expect(findByRole(edit.submenu!, "cut")).toBeDefined();
+    expect(findByRole(edit.submenu!, "undo")).toBeDefined();
+    expect(findByRole(edit.submenu!, "redo")).toBeDefined();
+  });
+
+  test("Edit submenu に pasteAndMatchStyle / delete の role が含まれる", () => {
+    const menu = buildApplicationMenu(makeDeps());
+    const edit = menu[2] as { submenu?: MenuItem[] };
+    expect(findByRole(edit.submenu!, "pasteAndMatchStyle")).toBeDefined();
+    expect(findByRole(edit.submenu!, "delete")).toBeDefined();
+  });
+
+  test("Edit submenu の順序は undo → redo → divider → cut → copy → paste → pasteAndMatchStyle → delete → selectAll", () => {
+    const menu = buildApplicationMenu(makeDeps());
+    const edit = menu[2] as { submenu?: MenuItem[] };
+    const seq = edit.submenu!.map((i) => {
+      const type = (i as { type?: string }).type;
+      if (type === "divider" || type === "separator") return "divider";
+      return (i as { role?: string }).role ?? "(unknown)";
+    });
+    expect(seq).toEqual([
+      "undo",
+      "redo",
+      "divider",
+      "cut",
+      "copy",
+      "paste",
+      "pasteAndMatchStyle",
+      "delete",
+      "selectAll",
+    ]);
   });
 });
 

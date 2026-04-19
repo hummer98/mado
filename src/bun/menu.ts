@@ -14,6 +14,9 @@ import { log } from "../lib/logger";
 // --- トップレベルラベル ---
 export const APP_MENU_LABEL = "mado";
 export const FILE_MENU_LABEL = "File";
+// macOS は "Edit" というラベルを手掛かりに Emoji & Symbols 等を自動挿入するため
+// 英名 "Edit" を固定し、多言語化は別タスクで扱う。
+export const EDIT_MENU_LABEL = "Edit";
 export const WINDOW_MENU_LABEL = "Window";
 
 // --- アクション識別子 ---
@@ -126,6 +129,23 @@ export function buildApplicationMenu(deps: MenuDeps): ApplicationMenuItemConfig[
     ],
   };
 
+  // Edit メニュー: ⌘C 等のショートカットは macOS 既定に任せるため
+  // accelerator は明示せず role のみを指定する。
+  const editMenu: ApplicationMenuItemConfig = {
+    label: EDIT_MENU_LABEL,
+    submenu: [
+      { role: "undo" },
+      { role: "redo" },
+      { type: "divider" },
+      { role: "cut" },
+      { role: "copy" },
+      { role: "paste" },
+      { role: "pasteAndMatchStyle" },
+      { role: "delete" },
+      { role: "selectAll" },
+    ],
+  };
+
   const dynamicWindows: ApplicationMenuItemConfig[] = deps
     .listWindows()
     .map((w) => ({
@@ -150,7 +170,7 @@ export function buildApplicationMenu(deps: MenuDeps): ApplicationMenuItemConfig[
     submenu: windowSubmenu,
   };
 
-  return [appMenu, fileMenu, windowMenu];
+  return [appMenu, fileMenu, editMenu, windowMenu];
 }
 
 /**
