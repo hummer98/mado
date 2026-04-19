@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-19
+
+### Added
+- persist window size and position per project (T022)
+
+### Changed
+- docs: require logging raw external inputs before parsing
+- Merge T023: Homebrew Cask tap v0.0.2
+- docs: recommend Homebrew Cask install for mado (T023)
+- Merge T022: per-project window state persistence
+
 ## [0.0.2] - 2026-04-13
 
 ### Added
