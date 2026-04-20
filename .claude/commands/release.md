@@ -46,7 +46,31 @@ if [ "$BRANCH" != "main" ]; then
   exit 1
 fi
 
-# bun test
+# リモートを最新化してローカルコミットも同期してから作業する
+# （他の worktree や手動コミットで main が先行していても正しい HEAD から
+#  バージョン判定 / ビルド / タグ付けを行うため）
+git fetch origin main || { echo "❌ git fetch origin main 失敗"; exit 1; }
+
+# origin/main から fast-forward できるか確認
+AHEAD=$(git rev-list --count origin/main..HEAD)
+BEHIND=$(git rev-list --count HEAD..origin/main)
+
+if [ "$BEHIND" -gt 0 ]; then
+  # リモートが先行している場合は fast-forward で追従
+  git pull --ff-only origin main || {
+    echo "❌ git pull --ff-only 失敗（ローカルとリモートが分岐している可能性）。手動で解消してください。"
+    exit 1
+  }
+  echo "✅ origin/main に追従（$BEHIND コミット pull）"
+fi
+
+if [ "$AHEAD" -gt 0 ]; then
+  # ローカルに未 push のコミットがある場合は push
+  git push origin main || { echo "❌ git push origin main 失敗"; exit 1; }
+  echo "✅ ローカルコミットを push（$AHEAD コミット）"
+fi
+
+# bun test（最新コードに対して実施）
 bun test || { echo "❌ bun test 失敗"; exit 1; }
 
 # 未コミット変更チェック
