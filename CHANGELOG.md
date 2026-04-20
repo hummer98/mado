@@ -6,13 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-21
+
+### Added
+- automate Homebrew Cask update via GitHub Actions (T024)
+- list Markdown files in left pane when given a directory; support `-r/--recursive` (T027)
+- Edit menu enabling Cmd+C copy in Markdown view (T028)
+- right-click context menu on sidebar file entries (T029)
+
 ### Fixed
+- resolve relative image paths in Markdown rendering
 - `bin/mado <file>` was falling back to `README.md` on stale builds because the
   launcher doesn't forward argv; the current source already reads `MADO_FILE`
   correctly. Added a permanent `startup_invocation` diagnostic log (argv / cwd /
   env_MADO_FILE) so the same symptom can be triaged in one line next time.
   Re-run `bun run build:dev` on any checkout that still exhibits the old
   behavior. (T025)
+
+### Changed
+- release skill: add git fetch / pull --ff-only / push sync steps before bump
 
 ## [0.1.0] - 2026-04-19
 

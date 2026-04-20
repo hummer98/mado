@@ -4,7 +4,7 @@ export default {
   app: {
     name: "mado",
     identifier: "dev.mado.app",
-    version: "0.1.0",
+    version: "0.2.0",
   },
   runtime: {
     exitOnLastWindowClosed: true,
