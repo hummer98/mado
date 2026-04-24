@@ -10,11 +10,15 @@ import {
   APP_MENU_LABEL,
   FILE_MENU_LABEL,
   EDIT_MENU_LABEL,
+  VIEW_MENU_LABEL,
   WINDOW_MENU_LABEL,
   FILE_OPEN_ACTION,
   FILE_OPEN_RECENT_ACTION,
   APP_PREFERENCES_ACTION,
   WINDOW_FOCUS_ACTION,
+  VIEW_ZOOM_IN_ACTION,
+  VIEW_ZOOM_OUT_ACTION,
+  VIEW_ZOOM_RESET_ACTION,
   ACCELERATOR_QUIT,
   ACCELERATOR_HIDE,
   ACCELERATOR_HIDE_OTHERS,
@@ -22,6 +26,9 @@ import {
   ACCELERATOR_OPEN,
   ACCELERATOR_CLOSE,
   ACCELERATOR_MINIMIZE,
+  ACCELERATOR_ZOOM_IN,
+  ACCELERATOR_ZOOM_OUT,
+  ACCELERATOR_ZOOM_RESET,
   buildApplicationMenu,
   dispatchMenuAction,
 } from "./menu";
@@ -33,6 +40,9 @@ function makeDeps(overrides: Partial<MenuDeps> = {}): MenuDeps {
     listWindows: () => [],
     focusWindowById: () => {},
     openFileDialog: async () => [],
+    zoomIn: () => {},
+    zoomOut: () => {},
+    zoomReset: () => {},
     ...overrides,
   };
 }
@@ -59,17 +69,19 @@ function findByRole(items: MenuItem[], role: string): MenuItem | undefined {
 }
 
 describe("buildApplicationMenu", () => {
-  test("4 つのトップレベルメニュー (mado / File / Edit / Window) を返す", () => {
+  test("5 つのトップレベルメニュー (mado / File / Edit / View / Window) を返す", () => {
     const menu = buildApplicationMenu(makeDeps());
-    expect(menu).toHaveLength(4);
+    expect(menu).toHaveLength(5);
     assertNormal(menu[0]!);
     assertNormal(menu[1]!);
     assertNormal(menu[2]!);
     assertNormal(menu[3]!);
+    assertNormal(menu[4]!);
     expect((menu[0] as { label?: string }).label).toBe(APP_MENU_LABEL);
     expect((menu[1] as { label?: string }).label).toBe(FILE_MENU_LABEL);
     expect((menu[2] as { label?: string }).label).toBe(EDIT_MENU_LABEL);
-    expect((menu[3] as { label?: string }).label).toBe(WINDOW_MENU_LABEL);
+    expect((menu[3] as { label?: string }).label).toBe(VIEW_MENU_LABEL);
+    expect((menu[4] as { label?: string }).label).toBe(WINDOW_MENU_LABEL);
   });
 
   test("Application メニューに role:quit + Cmd+Q accelerator がある", () => {
@@ -137,7 +149,7 @@ describe("buildApplicationMenu", () => {
 
   test("Window メニューに minimize / zoom / bringAllToFront の role が含まれる", () => {
     const menu = buildApplicationMenu(makeDeps());
-    const win = menu[3] as { submenu?: MenuItem[] };
+    const win = menu[4] as { submenu?: MenuItem[] };
     const minimize = findByRole(win.submenu!, "minimize");
     expect(minimize).toBeDefined();
     expect((minimize as { accelerator?: string }).accelerator).toBe(ACCELERATOR_MINIMIZE);
@@ -153,7 +165,7 @@ describe("buildApplicationMenu", () => {
       ],
     });
     const menu = buildApplicationMenu(deps);
-    const win = menu[3] as { submenu?: MenuItem[] };
+    const win = menu[4] as { submenu?: MenuItem[] };
     const sub = win.submenu!;
     const dynamicItems = sub.filter(
       (i) => (i as { action?: string }).action === WINDOW_FOCUS_ACTION,
@@ -169,7 +181,7 @@ describe("buildApplicationMenu", () => {
 
   test("listWindows() が 0 件なら動的項目は展開されない", () => {
     const menu = buildApplicationMenu(makeDeps());
-    const win = menu[3] as { submenu?: MenuItem[] };
+    const win = menu[4] as { submenu?: MenuItem[] };
     const dynamicItems = win.submenu!.filter(
       (i) => (i as { action?: string }).action === WINDOW_FOCUS_ACTION,
     );
@@ -227,6 +239,50 @@ describe("buildApplicationMenu > Edit メニュー", () => {
       "delete",
       "selectAll",
     ]);
+  });
+});
+
+describe("buildApplicationMenu > View メニュー", () => {
+  test("View メニューは menu[3] に存在し VIEW_MENU_LABEL を持つ", () => {
+    const menu = buildApplicationMenu(makeDeps());
+    const view = menu[3] as { label?: string; submenu?: MenuItem[] };
+    expect(view.label).toBe(VIEW_MENU_LABEL);
+    expect(view.submenu).toBeDefined();
+  });
+
+  test("View submenu に 拡大 / 縮小 / 実寸 が正しい順序で並び、action / accelerator が設定される", () => {
+    const menu = buildApplicationMenu(makeDeps());
+    const view = menu[3] as { submenu?: MenuItem[] };
+    const sub = view.submenu!;
+    expect(sub).toHaveLength(3);
+
+    const zoomIn = sub[0] as {
+      label?: string;
+      action?: string;
+      accelerator?: string;
+    };
+    const zoomOut = sub[1] as {
+      label?: string;
+      action?: string;
+      accelerator?: string;
+    };
+    const zoomReset = sub[2] as {
+      label?: string;
+      action?: string;
+      accelerator?: string;
+    };
+
+    expect(zoomIn.label).toBe("拡大");
+    expect(zoomIn.action).toBe(VIEW_ZOOM_IN_ACTION);
+    expect(zoomIn.accelerator).toBe(ACCELERATOR_ZOOM_IN);
+
+    expect(zoomOut.label).toBe("縮小");
+    expect(zoomOut.action).toBe(VIEW_ZOOM_OUT_ACTION);
+    expect(zoomOut.accelerator).toBe(ACCELERATOR_ZOOM_OUT);
+
+    expect(zoomReset.label).toBe("実寸");
+    expect(zoomReset.action).toBe(VIEW_ZOOM_RESET_ACTION);
+    expect(zoomReset.accelerator).toBe(ACCELERATOR_ZOOM_RESET);
   });
 });
 
@@ -301,6 +357,27 @@ describe("dispatchMenuAction", () => {
     });
     await dispatchMenuAction({ action: WINDOW_FOCUS_ACTION, data: {} }, deps);
     expect(focused).toEqual([]);
+  });
+
+  test("view:zoom-in → deps.zoomIn を呼ぶ", async () => {
+    let called = 0;
+    const deps = makeDeps({ zoomIn: () => called++ });
+    await dispatchMenuAction({ action: VIEW_ZOOM_IN_ACTION }, deps);
+    expect(called).toBe(1);
+  });
+
+  test("view:zoom-out → deps.zoomOut を呼ぶ", async () => {
+    let called = 0;
+    const deps = makeDeps({ zoomOut: () => called++ });
+    await dispatchMenuAction({ action: VIEW_ZOOM_OUT_ACTION }, deps);
+    expect(called).toBe(1);
+  });
+
+  test("view:zoom-reset → deps.zoomReset を呼ぶ", async () => {
+    let called = 0;
+    const deps = makeDeps({ zoomReset: () => called++ });
+    await dispatchMenuAction({ action: VIEW_ZOOM_RESET_ACTION }, deps);
+    expect(called).toBe(1);
   });
 
   test("未知 action は何もしない (例外を投げない)", async () => {

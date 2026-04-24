@@ -10,6 +10,7 @@ import { gfmHeadingId } from "marked-gfm-heading-id";
 import hljs from "highlight.js";
 import mermaid from "mermaid";
 import { rewriteImageUrls } from "./rewrite-image-urls";
+import { clampZoom, nextZoomIn, nextZoomOut, ZOOM_DEFAULT } from "../lib/zoom-state";
 
 // --- marked の設定 ---
 
@@ -188,6 +189,14 @@ async function render(markdownText: string, filePath: string): Promise<void> {
   if (mainEl) {
     mainEl.scrollTop = savedScrollY;
   }
+
+  // Hot Reload / ファイル切替時に inline zoom が失われていた場合のフェイルセーフ (T032)。
+  // render() は .markdown-body の innerHTML を差し替えるが要素自体は維持するため
+  // 通常 zoom style は残る。念のため currentZoom が DEFAULT 以外なら再適用する。
+  if (currentZoom !== ZOOM_DEFAULT) {
+    contentEl.style.zoom = String(currentZoom);
+  }
+
   lastRenderedFilePath = filePath;
 }
 
@@ -439,6 +448,12 @@ declare global {
     __MADO_WS_CONNECT__: (port: number) => void;
     /** View メニュー (⌘⌥S) から executeJavascript で呼び出される toggle 関数 */
     __MADO_TOGGLE_SIDEBAR__: () => void;
+    /** View > 拡大 (⌘+) から executeJavascript で呼び出される (T032) */
+    __MADO_ZOOM_IN__: () => void;
+    /** View > 縮小 (⌘-) から executeJavascript で呼び出される (T032) */
+    __MADO_ZOOM_OUT__: () => void;
+    /** View > 実寸 (⌘0) から executeJavascript で呼び出される (T032) */
+    __MADO_ZOOM_RESET__: () => void;
     /** Electrobun のプリロードが提供する host-message 送信関数 */
     __electrobunSendToHost?: (data: unknown) => void;
   }
@@ -455,6 +470,41 @@ window.__MADO_WS_CONNECT__ = (port: number): void => {
 
 window.__MADO_TOGGLE_SIDEBAR__ = (): void => {
   toggleSidebar("menu");
+};
+
+// --- ズーム制御 (T032) ---
+//
+// 計画通り本文コンテナ (`#content` = `article.markdown-body`) の CSS `zoom` を
+// 書き換えることで、サイドバー非影響・Mermaid/コードブロック込みの一括ズームを実現する。
+// 状態はモジュールスコープの currentZoom に保持し、Hot Reload で .markdown-body の
+// innerHTML が差し替わっても要素自体は残るため inline style は維持される想定。
+//
+// DOM 不在（welcome 画面で content が未表示）でも currentZoom は更新される。
+// これは次に .markdown-body が表示された時、CSS デフォルト zoom:1 と state が
+// 一致する限り問題にならない（ZOOM_DEFAULT は 1.0）。別倍率で welcome から
+// 抜けた場合のフェイルセーフとして、render() 終端で inline style を再適用する。
+let currentZoom: number = ZOOM_DEFAULT;
+
+function applyZoom(next: number): void {
+  const clamped = clampZoom(next);
+  if (clamped === currentZoom) return;
+  currentZoom = clamped;
+  // `#content` (= article.markdown-body) を直接取得する。
+  // id の方が「本文コンテナ」という意図に近く、Welcome 時も要素自体は存在する。
+  const el = document.getElementById("content");
+  if (!el) return;
+  el.style.zoom = String(currentZoom);
+  console.log(`[mado] zoom_changed level=${currentZoom}`);
+}
+
+window.__MADO_ZOOM_IN__ = (): void => {
+  applyZoom(nextZoomIn(currentZoom));
+};
+window.__MADO_ZOOM_OUT__ = (): void => {
+  applyZoom(nextZoomOut(currentZoom));
+};
+window.__MADO_ZOOM_RESET__ = (): void => {
+  applyZoom(ZOOM_DEFAULT);
 };
 
 console.log("[mado] renderer_started");

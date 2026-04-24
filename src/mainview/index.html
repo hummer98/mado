@@ -130,6 +130,9 @@
       margin: 0 auto;
       padding: 32px;
       box-sizing: border-box;
+      /* T032: JS (window.__MADO_ZOOM_*) から inline style.zoom で書き換えて拡大縮小する。
+         デフォルトを明示することで DevTools でも初期状態が見える。 */
+      zoom: 1;
     }
 
     /* ダークモード対応 */

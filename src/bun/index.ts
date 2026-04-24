@@ -756,6 +756,11 @@ async function main(): Promise<void> {
       }
     },
     openFileDialog: (opts) => Utils.openFileDialog(opts),
+    // View メニュー: WebView 側の __MADO_ZOOM_* を呼ぶ (T032)。
+    // ログは WebView 側 applyZoom が出すため Bun 側では二重記録しない。
+    zoomIn: () => win.webview.executeJavascript("window.__MADO_ZOOM_IN__()"),
+    zoomOut: () => win.webview.executeJavascript("window.__MADO_ZOOM_OUT__()"),
+    zoomReset: () => win.webview.executeJavascript("window.__MADO_ZOOM_RESET__()"),
   });
 
   // 10b'. 左ペインファイルエントリ用コンテキストメニューをインストール

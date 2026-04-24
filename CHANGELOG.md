@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- View メニュー: 拡大 (⌘+) / 縮小 (⌘-) / 実寸 (⌘0) で Markdown 本文を 50%〜200% にズーム (T032)
+
 ## [0.2.0] - 2026-04-21
 
 ### Added
