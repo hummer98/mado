@@ -11,6 +11,16 @@ import hljs from "highlight.js";
 import mermaid from "mermaid";
 import { rewriteImageUrls } from "./rewrite-image-urls";
 import { clampZoom, nextZoomIn, nextZoomOut, ZOOM_DEFAULT } from "../lib/zoom-state";
+import {
+  MERMAID_ZOOM_DEFAULT,
+  MERMAID_ZOOM_MIN,
+  MERMAID_ZOOM_MAX,
+  clampMermaidZoom,
+  nextMermaidZoomIn,
+  nextMermaidZoomOut,
+  refocusTranslate,
+  wheelDeltaToScaleFactor,
+} from "../lib/mermaid-zoom";
 
 // --- marked の設定 ---
 
@@ -173,6 +183,13 @@ async function render(markdownText: string, filePath: string): Promise<void> {
       await mermaid.run({ nodes: validNodes });
     } catch (err) {
       console.error("[mado] mermaid render error:", err);
+    }
+    // attach は try の外。一部の図が throw しても残りの図へ個別ズームを付ける (plan §3.3)。
+    // attachMermaidZoom は svg が見つからないノードを早期 return でスキップする。
+    for (let i = 0; i < validNodes.length; i++) {
+      const node = validNodes[i];
+      if (!node) continue;
+      attachMermaidZoom(node, contentEl, i, validNodes.length);
     }
   }
 
@@ -508,3 +525,252 @@ window.__MADO_ZOOM_RESET__ = (): void => {
 };
 
 console.log("[mado] renderer_started");
+
+// trackpad pinch が届いたことを 1 回だけ記録する状態変化ログ（T033）。
+// 以後は高頻度 wheel ループを発火させないため、同一セッションで 1 回限り。
+let __madoPinchSeen = false;
+document.addEventListener(
+  "wheel",
+  (e) => {
+    if (e.ctrlKey && !__madoPinchSeen) {
+      __madoPinchSeen = true;
+      console.log(`[mado] pinch_detected deltaY=${e.deltaY.toFixed(3)}`);
+    }
+  },
+  { passive: true },
+);
+
+// --- Mermaid 個別ズーム (T033) ---
+
+/** 1 つの Mermaid に紐づくズーム状態 */
+interface MermaidZoomState {
+  scale: number;
+  tx: number;
+  ty: number;
+}
+
+/**
+ * Mermaid `<svg>` に個別の pan/zoom を付与する。
+ *
+ * - `container` (= `<pre class="mermaid">` もしくは mermaid.run 後の置換要素) の子 svg を
+ *   `.mermaid-zoom-wrapper` で包み、overlay に拡大/縮小/リセットボタンを付ける。
+ * - wheel + ctrlKey (trackpad pinch) で focal-point zoom。`ctrlKey` なしの wheel は
+ *   preventDefault しないのでページスクロールは生きる。
+ * - `scale > 1` のとき pointerdown→move でパン可能。threshold 3px 未満はクリック透過。
+ *
+ * focal-point 計算では T032 の outer CSS `zoom` を `getComputedStyle(contentEl).zoom` で
+ * 取得し、`event.clientX/Y - rect` を outerZoom で割って local 座標へ揃える (plan §2.3)。
+ */
+function attachMermaidZoom(
+  container: HTMLElement,
+  contentEl: HTMLElement,
+  index: number,
+  total: number,
+): void {
+  const svg = container.querySelector<SVGElement>("svg");
+  if (!svg) return;
+
+  // Hot Reload / 二重 attach 防止
+  if (container.dataset.madoZoomAttached === "true") return;
+
+  // 1. wrap
+  const wrapper = document.createElement("div");
+  wrapper.className = "mermaid-zoom-wrapper";
+  svg.before(wrapper);
+  wrapper.appendChild(svg);
+
+  // 2. state (クロージャ保持: wrapper ごとに独立)
+  const state: MermaidZoomState = {
+    scale: MERMAID_ZOOM_DEFAULT,
+    tx: 0,
+    ty: 0,
+  };
+
+  const applyTransform = (): void => {
+    svg.style.transform = `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`;
+    if (state.scale > 1) {
+      wrapper.classList.add("is-zoomed");
+    } else {
+      wrapper.classList.remove("is-zoomed");
+    }
+  };
+
+  /** ボタン操作時だけ短時間 transition を付ける (plan §3.3: pinch 中のドリフト回避) */
+  const withTransientTransition = (apply: () => void): void => {
+    svg.style.transition = "transform 80ms ease-out";
+    apply();
+    setTimeout(() => {
+      svg.style.transition = "";
+    }, 120);
+  };
+
+  /** T032 の outer zoom を DOM から取得（plan §2.3: DOM の真実を優先） */
+  const getOuterZoom = (): number => {
+    const raw = getComputedStyle(contentEl).zoom;
+    const parsed = parseFloat(raw || "1");
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  };
+
+  /** ボタン・wheel 共通: scale を変更して transform を反映 */
+  const setScale = (
+    nextScale: number,
+    focalX: number,
+    focalY: number,
+    source: "button" | "wheel" | "pinch",
+  ): void => {
+    const clamped = clampMermaidZoom(nextScale);
+    if (clamped === state.scale) return;
+    const { tx, ty } = refocusTranslate(state, clamped, focalX, focalY);
+    state.scale = clamped;
+    state.tx = tx;
+    state.ty = ty;
+    applyTransform();
+    console.log(
+      `[mado] mermaid_zoom_changed index=${index} scale=${state.scale.toFixed(3)} source=${source}`,
+    );
+  };
+
+  // 3. overlay ボタン
+  const controls = document.createElement("div");
+  controls.className = "mermaid-zoom-controls";
+
+  const makeButton = (label: string, aria: string): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.setAttribute("aria-label", aria);
+    b.title = aria;
+    return b;
+  };
+
+  const btnIn = makeButton("+", "Mermaid 拡大");
+  const btnOut = makeButton("−", "Mermaid 縮小");
+  const btnReset = makeButton("⟲", "Mermaid リセット");
+
+  btnIn.addEventListener("click", () => {
+    const rect = wrapper.getBoundingClientRect();
+    // ボタン操作時は wrapper 中心を focal とする（カーソル位置よりも自然な UX）
+    const outerZoom = getOuterZoom();
+    const fx = (rect.width / 2) / outerZoom;
+    const fy = (rect.height / 2) / outerZoom;
+    withTransientTransition(() => {
+      setScale(nextMermaidZoomIn(state.scale), fx, fy, "button");
+    });
+  });
+  btnOut.addEventListener("click", () => {
+    const rect = wrapper.getBoundingClientRect();
+    const outerZoom = getOuterZoom();
+    const fx = (rect.width / 2) / outerZoom;
+    const fy = (rect.height / 2) / outerZoom;
+    withTransientTransition(() => {
+      setScale(nextMermaidZoomOut(state.scale), fx, fy, "button");
+    });
+  });
+  btnReset.addEventListener("click", () => {
+    withTransientTransition(() => {
+      state.scale = MERMAID_ZOOM_DEFAULT;
+      state.tx = 0;
+      state.ty = 0;
+      applyTransform();
+      console.log(`[mado] mermaid_zoom_reset index=${index}`);
+    });
+  });
+
+  controls.appendChild(btnIn);
+  controls.appendChild(btnOut);
+  controls.appendChild(btnReset);
+  wrapper.appendChild(controls);
+
+  // 4. wheel (pinch / Ctrl+scroll)
+  wrapper.addEventListener(
+    "wheel",
+    (e: WheelEvent) => {
+      // ctrlKey なしの wheel は通常のページスクロールに任せる (plan §7.4)
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const rect = wrapper.getBoundingClientRect();
+      const outerZoom = getOuterZoom();
+      const fx = (e.clientX - rect.left) / outerZoom;
+      const fy = (e.clientY - rect.top) / outerZoom;
+      const factor = wheelDeltaToScaleFactor(e.deltaY);
+      const nextScale = Math.min(
+        MERMAID_ZOOM_MAX,
+        Math.max(MERMAID_ZOOM_MIN, state.scale * factor),
+      );
+      setScale(nextScale, fx, fy, "pinch");
+    },
+    { passive: false },
+  );
+
+  // 5. pan (pointer)
+  let panActive = false;
+  let panStartX = 0;
+  let panStartY = 0;
+  let panLastX = 0;
+  let panLastY = 0;
+  let panMoved = false; // 3px 閾値越え = クリック透過しない
+  const DRAG_THRESHOLD = 3;
+
+  wrapper.addEventListener("pointerdown", (e: PointerEvent) => {
+    if (e.button !== 0) return; // 左クリック以外は無視
+    if (state.scale <= 1) return; // scale=1 ではパン無効 (plan §1.1)
+    // overlay ボタン上では pan を発動しない
+    const target = e.target as Element | null;
+    if (target?.closest(".mermaid-zoom-controls")) return;
+
+    panActive = true;
+    panMoved = false;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panLastX = e.clientX;
+    panLastY = e.clientY;
+    try {
+      wrapper.setPointerCapture(e.pointerId);
+    } catch (err) {
+      console.error("[mado] setPointerCapture failed:", err);
+    }
+  });
+
+  wrapper.addEventListener("pointermove", (e: PointerEvent) => {
+    if (!panActive) return;
+    const dx = e.clientX - panStartX;
+    const dy = e.clientY - panStartY;
+    if (!panMoved && Math.hypot(dx, dy) < DRAG_THRESHOLD) {
+      return; // threshold 未満: クリック透過のため no-op
+    }
+    if (!panMoved) {
+      panMoved = true;
+      wrapper.classList.add("is-panning");
+    }
+    // movementX/Y は WKWebView で不整合の可能性あり → clientX/Y の差分を優先 (plan §9)
+    const stepX = e.clientX - panLastX;
+    const stepY = e.clientY - panLastY;
+    panLastX = e.clientX;
+    panLastY = e.clientY;
+    const outerZoom = getOuterZoom();
+    state.tx += stepX / outerZoom;
+    state.ty += stepY / outerZoom;
+    applyTransform();
+  });
+
+  const endPan = (e: PointerEvent): void => {
+    if (!panActive) return;
+    panActive = false;
+    wrapper.classList.remove("is-panning");
+    try {
+      wrapper.releasePointerCapture(e.pointerId);
+    } catch {
+      // pointerId が既に release 済みのケースは握りつぶす（冪等処理）
+    }
+    if (panMoved) {
+      console.log(
+        `[mado] mermaid_zoom_pan_end index=${index} tx=${state.tx.toFixed(1)} ty=${state.ty.toFixed(1)}`,
+      );
+    }
+  };
+  wrapper.addEventListener("pointerup", endPan);
+  wrapper.addEventListener("pointercancel", endPan);
+
+  container.dataset.madoZoomAttached = "true";
+  console.log(`[mado] mermaid_zoom_attached index=${index} total=${total}`);
+}
