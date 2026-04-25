@@ -13,3 +13,26 @@ artifacts/
 # OS
 .DS_Store
 package-lock.json
+
+# Apple codesign / notarize の秘密情報
+# .envrc は direnv 設定（source_up + ローカル固有 env）で個人環境ごとに違う
+.env.local
+.envrc
+*.p8
+*.p12
+*.cer
+
+# fastlane の生成物
+# Fastfile / Appfile / Pluginfile はコミット対象。それ以外の生成物は除外
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+fastlane/README.md
+
+# Bundler
+.bundle/
+vendor/bundle/
+
+# Claude Code 関連
+.claude/scheduled_tasks.lock
