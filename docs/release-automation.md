@@ -5,7 +5,7 @@ mado の GitHub Release publish 時に `hummer98/homebrew-mado` の `Casks/mado.
 
 ## 構成概要
 
-- **Workflow**: `.github/workflows/release.yml`
+- **Workflow**: `.github/workflows/update-tap.yml`
 - **トリガー**: `release: published` / `workflow_dispatch`
 - **更新対象**: `hummer98/homebrew-mado` (別リポジトリ) の `Casks/mado.rb`
 - **認証**: mado 本体リポジトリの Secret `HOMEBREW_TAP_TOKEN` (PAT)
@@ -104,7 +104,7 @@ git push
 
 本番 release を汚さず workflow 自体の正常性を確認したい場合:
 
-1. `https://github.com/hummer98/mado/actions/workflows/release.yml` を開く
+1. `https://github.com/hummer98/mado/actions/workflows/update-tap.yml` を開く
 2. **Run workflow** → `tag` 入力欄に過去のリリース tag (例: `v0.0.2`) を指定
 3. 実行ログで `No changes (already up-to-date)` と出力されれば OK
    （同値書き換えのため `Commit & push` step でスキップされる）

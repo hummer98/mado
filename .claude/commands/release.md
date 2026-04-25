@@ -369,10 +369,10 @@ echo "✅ リリース完了: https://github.com/hummer98/mado/releases/tag/v$NE
 
 ### 12. Cask 自動更新の確認
 
-`release: published` イベントにより `.github/workflows/release.yml` が起動し、
+`release: published` イベントにより `.github/workflows/update-tap.yml` が起動し、
 `hummer98/homebrew-mado` の `Casks/mado.rb` が自動更新される（通常 1〜2 分）。
 
-- GitHub Actions 実行状況: https://github.com/hummer98/mado/actions/workflows/release.yml
+- GitHub Actions 実行状況: https://github.com/hummer98/mado/actions/workflows/update-tap.yml
 - 失敗時: workflow ログを確認し、後述の「リリース失敗時のロールバック」手順を参照した上で、
   手動で Cask を更新するか Actions を workflow_dispatch で再実行する。
 - PAT 管理および失効時の対応は `docs/release-automation.md` を参照。
