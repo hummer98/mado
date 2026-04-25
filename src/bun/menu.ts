@@ -39,9 +39,14 @@ export const ACCELERATOR_PREFERENCES = "CommandOrControl+,";
 export const ACCELERATOR_OPEN = "CommandOrControl+O";
 export const ACCELERATOR_CLOSE = "CommandOrControl+W";
 export const ACCELERATOR_MINIMIZE = "CommandOrControl+M";
-// Cmd+"+" は Shift+"=" のため "=" で受ける (Electron/Chromium と同じ慣例)。
-// 動かない場合は "CommandOrControl+Plus" → "CommandOrControl+Equal" の順で試す。
-export const ACCELERATOR_ZOOM_IN = "CommandOrControl+=";
+// JIS キーボードで "=" accelerator が `Cmd+;` に化ける問題への対応。
+// `Plus` を key として登録 → NSMenuItem 側で "+" 文字 + Shift modifier と扱われ
+//   - US 配列: Cmd+Shift+= (= "+" を入力するときと同じ操作)
+//   - JIS 配列: Cmd+Shift+; (= "+" を入力するときと同じ操作)
+// で発火し、メニュー表示も ⌘+ になり Chrome / Safari の表示慣例とも揃う。
+// `++` だと accelerator parser が `+` を separator として split したあとに空の
+// key 名が残って解釈不能になるため、Electron/Chromium の慣例どおり `Plus` を使う。
+export const ACCELERATOR_ZOOM_IN = "CommandOrControl+Plus";
 export const ACCELERATOR_ZOOM_OUT = "CommandOrControl+-";
 export const ACCELERATOR_ZOOM_RESET = "CommandOrControl+0";
 
