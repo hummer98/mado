@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="mado app icon">
+  <title>mado</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7dd3fc"></stop>
+      <stop offset="1" stop-color="#0284c7"></stop>
+    </linearGradient>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229"></rect>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#squircle)">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#bg)"></rect>
+    <g transform="translate(192,192)" fill="none" stroke="#ffffff" stroke-width="44" stroke-linejoin="round" stroke-linecap="round">
+      <rect x="0" y="0" width="640" height="640" rx="20"></rect>
+      <line x1="320" y1="22" x2="320" y2="618"></line>
+      <line x1="22" y1="320" x2="618" y2="320"></line>
+    </g>
+  </g>
+  <rect x="1" y="1" width="1022" height="1022" rx="228" ry="228" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="2"></rect>
+</svg>

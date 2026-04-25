@@ -45,6 +45,10 @@ export default {
         // node-gyp 系の動的ライブラリ読み込みに必要
         "com.apple.security.cs.disable-library-validation": true,
       },
+      // App icon。Electrobun が iconutil で .icns に変換して
+      // Contents/Resources/AppIcon.icns に配置する。
+      // master SVG: assets/icon.svg
+      icons: "assets/icon.iconset",
     },
   },
 } satisfies ElectrobunConfig;
