@@ -12,6 +12,16 @@
 
 <!-- TODO: スクリーンショット -->
 
+## なぜ作ったか
+
+Markdown エディターは数あれど、AI エージェントとコーディングしていると Markdown 自体を編集する場面はほとんどありません。エディター機能は単に邪魔なのです。かといって VSCode でプレビューを開くのは手間がかかりすぎる。
+
+ブラウザベースのビューワー（localhost 起動型）はいくつもありますが、普段遣いのタブと混ざってしまいます。URL スキームで `open` しても、どのウィンドウ・プロファイルで開くかを制御できません。
+
+GFM と Mermaid v11 をきちんと表示できるビューワーも少なかった。
+
+欲しかったのはシンプルで、「ターミナルから起動できるネイティブウィンドウ」。プロジェクトごとに専用ウィンドウを持ち、作業中はそこに留まる。それだけです。
+
 ## 特長
 
 - **GFM 完全対応** — `marked` + `marked-gfm-heading-id` による GitHub Flavored Markdown
@@ -64,7 +74,6 @@ mado https://...         # URL を開く(将来対応)
 
 mado は [Electrobun](https://electrobun.dev) — [Bun](https://bun.sh) と macOS ネイティブ WKWebView を組み合わせた軽量フレームワーク — の上に構築されています。Bun プロセスが CLI 引数をパースし、ファイルを watch し、WebSocket 経由で WebView に更新を push します。WebView 側では `marked` + `mermaid` が Markdown を描画します。
 
-プロダクト全体のコンセプトとアーキテクチャは [docs/seed.md](./docs/seed.md) を参照してください。
 
 ## 開発
 

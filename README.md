@@ -12,6 +12,16 @@
 
 <!-- TODO: screenshot -->
 
+## Why mado?
+
+Markdown editors are everywhere — but when you're coding with an AI agent, you almost never *edit* Markdown. Editor features just get in the way. Opening VS Code for a quick preview feels like overkill.
+
+Browser-based viewers (the localhost kind) are fine, but they mix in with your everyday tabs. Launching one via a URL scheme gives you no control over which window or browser profile catches it.
+
+Most existing viewers also lack proper GFM and Mermaid v11 support.
+
+What I actually wanted: one dedicated native window per project, launched from the terminal, that stays put while I work.
+
 ## Features
 
 - **GFM support** — GitHub Flavored Markdown via `marked` + `marked-gfm-heading-id`
@@ -64,7 +74,6 @@ Changes to the file are detected automatically and the view updates without losi
 
 mado is built on [Electrobun](https://electrobun.dev) — a lightweight framework combining [Bun](https://bun.sh) with the native macOS WKWebView. A thin Bun process parses CLI args, watches the file, and pushes updates over WebSocket to the WebView, which renders Markdown with `marked` + `mermaid`.
 
-See [docs/seed.md](./docs/seed.md) for the full product concept and architecture.
 
 ## Development
 
