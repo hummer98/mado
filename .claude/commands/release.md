@@ -2,6 +2,11 @@
 
 mado の新バージョンをリリースするための一連の手順を自動化するコマンド。
 
+**役割分担**: 本コマンドは **ローカルで version bump + tag push まで** を担当し、
+署名・公証・GitHub Release 作成・asset upload は **CI (`.github/workflows/build-release.yml`)**
+が tag push を契機に実行する。Homebrew Cask の自動更新は `release: published` を
+受けた `update-tap.yml` が担当する。詳細な構成図は `docs/release-automation.md` を参照。
+
 ## --auto オプション
 
 `/release --auto` で実行すると、対話なしの完全自動リリースが実行される。
@@ -230,144 +235,67 @@ else
 fi
 ```
 
-### 5. Prod ビルド（codesign 込み）
+### 5. version bump を PR で main にマージ
+
+main 直 push は branch protection / hook で拒否されるため、release branch を切って PR 経由でマージする。
 
 ```bash
-# Electrobun が helper / launcher / framework を含めて Developer ID で全署名する。
-# 必要 env: ELECTROBUN_DEVELOPER_ID（"Developer ID Application: ..."）
-# 詳細セットアップ: docs/signing-setup.md
-bun run build:prod
-
-APP_PATH="build/stable-macos-arm64/mado.app"
-if [ ! -d "$APP_PATH" ]; then
-  echo "❌ .app が生成されていない: $APP_PATH"
-  exit 1
-fi
-echo "✅ ビルド成功: $APP_PATH"
-```
-
-### 5.4. 公証 (notarize) — fastlane
-
-Electrobun は codesign のみ実施し、公証は fastlane に外出ししている
-（PEM の path 化を fastlane の app_store_connect_api_key action に任せる構成）。
-`~/git/.envrc` などで `APP_STORE_CONNECT_API_KEY_*` が設定済みである前提。
-
-```bash
-fastlane mac notarize_app || {
-  echo "❌ fastlane notarize_app 失敗"
-  exit 1
-}
-```
-
-`fastlane/Fastfile` の `notarize_app` lane が `.app` と（あれば）`.dmg` の両方を
-公証 + staple する。所要時間は通常 5〜15 分。
-
-### 5.5. 署名・公証検証
-
-1 つでも失敗したらリリース中止。
-
-```bash
-# codesign 検証（deep / strict / 署名チェーン全体）
-codesign --verify --deep --strict --verbose=2 "$APP_PATH" 2>&1 || {
-  echo "❌ codesign 検証失敗"
-  exit 1
-}
-
-# Gatekeeper 評価（Notarized Developer ID であること）
-spctl --assess --type execute --verbose=2 "$APP_PATH" 2>&1 || {
-  echo "❌ Gatekeeper 評価失敗（公証チケットの問題の可能性）"
-  exit 1
-}
-
-# staple 確認（オフラインでも Gatekeeper を通すには staple 済みである必要がある）
-stapler validate "$APP_PATH" || {
-  echo "❌ stapler validate 失敗（notarize が未完了 / staple されていない）"
-  exit 1
-}
-
-echo "✅ 署名・公証・staple 全て OK"
-```
-
-### 6. パッケージング
-
-```bash
-bash scripts/package.sh "$NEXT_VERSION"
-
-ZIP_PATH="dist/mado-v${NEXT_VERSION}-macos-arm64.zip"
-if [ ! -f "$ZIP_PATH" ]; then
-  echo "❌ zip が生成されていない: $ZIP_PATH"
-  exit 1
-fi
-echo "✅ パッケージング成功: $ZIP_PATH"
-```
-
-### 7. スモークテスト
-
-```bash
-bash scripts/smoke-test.sh "build/stable-macos-arm64/mado.app" || {
-  echo "❌ スモークテスト失敗。リリースを中止。"
-  exit 1
-}
-```
-
-**スモークテストが失敗した場合:**
-1. 出力のログ末尾を確認
-2. `$TMPDIR/mado/` 配下の直近ログも参照
-3. 問題を修正してから再ビルド
-4. **以降のステップ（commit / push / release）に進まないこと**
-
-### 8. コミット & プッシュ
-
-```bash
+RELEASE_BRANCH="release/v$NEXT_VERSION"
+git checkout -b "$RELEASE_BRANCH"
 git add package.json electrobun.config.ts CHANGELOG.md
-git commit -m "chore: bump version to v$NEXT_VERSION
+git commit -m "chore: bump version to v$NEXT_VERSION"
+git push -u origin "$RELEASE_BRANCH"
 
-🤖 Generated with Claude Code"
-git push origin main
-echo "✅ 変更をコミット & プッシュ"
+gh pr create --base main --head "$RELEASE_BRANCH" \
+  --title "chore: release v$NEXT_VERSION" \
+  --body "Bump version, see CHANGELOG.md for details."
+
+# 手動レビューが不要なら即マージ
+gh pr merge --merge --delete-branch
+
+git checkout main
+git pull --ff-only origin main
+echo "✅ v$NEXT_VERSION の version bump を main にマージ"
 ```
 
-### 9. Git タグの作成 & プッシュ
+### 6. Git タグの作成 & プッシュ → CI 起動
+
+tag push が `.github/workflows/build-release.yml` の trigger になり、CI が以降の
+ビルド・署名・公証・Release 作成・asset upload を全部実行する。
 
 ```bash
 git tag "v$NEXT_VERSION"
 git push origin "v$NEXT_VERSION"
-echo "✅ タグ v$NEXT_VERSION を作成 & プッシュ"
+echo "🚀 tag v$NEXT_VERSION を push、CI build-release.yml が起動"
 ```
 
-### 10. GitHub リリース作成
+### 7. CI ビルドの監視
 
 ```bash
-# CHANGELOG から該当バージョンの section を抽出
-RELEASE_NOTES=$(awk -v version="$NEXT_VERSION" '
-  $0 ~ "^## \\[" version "\\]" { flag=1; next }
-  /^## \[/ { flag=0 }
-  flag
-' CHANGELOG.md)
+sleep 5  # workflow キューイング待ち
+RUN_ID=$(gh run list --workflow=build-release.yml --branch="v$NEXT_VERSION" \
+  --limit 1 --json databaseId -q '.[0].databaseId')
 
-gh release create "v$NEXT_VERSION" \
-  --title "mado v$NEXT_VERSION" \
-  --notes "$RELEASE_NOTES"
-
-echo "✅ GitHub リリースを作成"
-```
-
-### 11. バイナリ添付 & 完了報告
-
-```bash
-gh release upload "v$NEXT_VERSION" \
-  "dist/mado-v${NEXT_VERSION}-macos-arm64.zip"
-
-# .dmg があれば添付
-if [ -f "dist/mado-v${NEXT_VERSION}-macos-arm64.dmg" ]; then
-  gh release upload "v$NEXT_VERSION" \
-    "dist/mado-v${NEXT_VERSION}-macos-arm64.dmg"
+if [ -z "$RUN_ID" ]; then
+  # tag push の workflow run は branch ではなく ref で取れることもある
+  RUN_ID=$(gh run list --workflow=build-release.yml --limit 1 \
+    --json databaseId,headBranch,event -q \
+    '.[] | select(.event=="push") | .databaseId' | head -1)
 fi
 
-echo "✅ リリース完了: https://github.com/hummer98/mado/releases/tag/v$NEXT_VERSION"
+gh run watch "$RUN_ID" --exit-status || {
+  echo "❌ CI が失敗。詳細: gh run view $RUN_ID --log-failed"
+  exit 1
+}
+echo "✅ CI 完了。GitHub Release を確認:"
+gh release view "v$NEXT_VERSION"
 ```
 
-### 12. Cask 自動更新の確認
+CI が完了すると以下が揃う:
+- 署名・公証済みの `.zip` / `.dmg`
+- GitHub Release（CHANGELOG ベースの notes 付き）
+
+### 8. Cask 自動更新の確認
 
 `release: published` イベントにより `.github/workflows/update-tap.yml` が起動し、
 `hummer98/homebrew-mado` の `Casks/mado.rb` が自動更新される（通常 1〜2 分）。
@@ -376,6 +304,12 @@ echo "✅ リリース完了: https://github.com/hummer98/mado/releases/tag/v$NE
 - 失敗時: workflow ログを確認し、後述の「リリース失敗時のロールバック」手順を参照した上で、
   手動で Cask を更新するか Actions を workflow_dispatch で再実行する。
 - PAT 管理および失効時の対応は `docs/release-automation.md` を参照。
+
+```bash
+sleep 30  # update-tap workflow の起動・完了待ち
+gh run list --workflow=update-tap.yml --limit 1 --json status,conclusion,url \
+  -q '.[0]'
+```
 
 ## 注意事項
 
@@ -405,6 +339,45 @@ mado は Apple Developer ID Application 証明書で署名し、Apple Notary Ser
 CI 上では GitHub Secrets から同等の env を注入する。
 詳細は `docs/release-automation.md` を参照（Phase 2 で整備予定）。
 
+### 手動 fallback（CI 障害時）
+
+GitHub Actions 全般が利用不可、または build-release.yml が長期障害で復旧見込みが
+無い場合の手動リリース手順。`~/git/.envrc` でローカル env が揃っていることが前提。
+
+```bash
+APP_PATH="build/stable-macos-arm64/mado.app"
+
+# 1. ローカルビルド（codesign 込み）
+bun run build:prod
+
+# 2. fastlane で公証 + staple（5〜15 分）
+fastlane mac notarize_app
+
+# 3. 検証（1 つでも失敗したらリリース中止）
+codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+spctl --assess --type execute --verbose=2 "$APP_PATH"   # accepted source=Notarized Developer ID
+stapler validate "$APP_PATH"
+
+# 4. パッケージング
+bash scripts/package.sh "$NEXT_VERSION"
+
+# 5. スモークテスト
+bash scripts/smoke-test.sh "$APP_PATH"
+
+# 6. GitHub Release 作成 & asset upload
+RELEASE_NOTES=$(awk -v version="$NEXT_VERSION" '
+  $0 ~ "^## \\[" version "\\]" { flag=1; next }
+  /^## \[/ { flag=0 }
+  flag
+' CHANGELOG.md)
+gh release create "v$NEXT_VERSION" --title "mado v$NEXT_VERSION" --notes "$RELEASE_NOTES"
+gh release upload "v$NEXT_VERSION" "dist/mado-v${NEXT_VERSION}-macos-arm64.zip"
+[ -f "dist/mado-v${NEXT_VERSION}-macos-arm64.dmg" ] && \
+  gh release upload "v$NEXT_VERSION" "dist/mado-v${NEXT_VERSION}-macos-arm64.dmg"
+```
+
+`update-tap.yml` は `release: published` で起動するので、Cask 自動更新は CI 経由でも動く。
+
 ### リリース失敗時のロールバック
 
 途中でエラーが発生した場合の戻し方:
@@ -428,5 +401,5 @@ git push origin main
 ### 今後のタスク
 
 - npm / bun registry への publish 対応（現状 `bin/mado` は dev 用 launcher 固定）
-- codesign / notarize の導入（Apple Developer ID が必要）
 - canary チャンネルのリリース運用定義（現状は stable のみ）
+- T-A の build-release.yml の本番試運転後、観測された改善点を取り込む
