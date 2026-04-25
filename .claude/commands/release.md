@@ -230,9 +230,12 @@ else
 fi
 ```
 
-### 5. Prod ビルド
+### 5. Prod ビルド（codesign 込み）
 
 ```bash
+# Electrobun が helper / launcher / framework を含めて Developer ID で全署名する。
+# 必要 env: ELECTROBUN_DEVELOPER_ID（"Developer ID Application: ..."）
+# 詳細セットアップ: docs/signing-setup.md
 bun run build:prod
 
 APP_PATH="build/stable-macos-arm64/mado.app"
@@ -241,6 +244,48 @@ if [ ! -d "$APP_PATH" ]; then
   exit 1
 fi
 echo "✅ ビルド成功: $APP_PATH"
+```
+
+### 5.4. 公証 (notarize) — fastlane
+
+Electrobun は codesign のみ実施し、公証は fastlane に外出ししている
+（PEM の path 化を fastlane の app_store_connect_api_key action に任せる構成）。
+`~/git/.envrc` などで `APP_STORE_CONNECT_API_KEY_*` が設定済みである前提。
+
+```bash
+fastlane mac notarize_app || {
+  echo "❌ fastlane notarize_app 失敗"
+  exit 1
+}
+```
+
+`fastlane/Fastfile` の `notarize_app` lane が `.app` と（あれば）`.dmg` の両方を
+公証 + staple する。所要時間は通常 5〜15 分。
+
+### 5.5. 署名・公証検証
+
+1 つでも失敗したらリリース中止。
+
+```bash
+# codesign 検証（deep / strict / 署名チェーン全体）
+codesign --verify --deep --strict --verbose=2 "$APP_PATH" 2>&1 || {
+  echo "❌ codesign 検証失敗"
+  exit 1
+}
+
+# Gatekeeper 評価（Notarized Developer ID であること）
+spctl --assess --type execute --verbose=2 "$APP_PATH" 2>&1 || {
+  echo "❌ Gatekeeper 評価失敗（公証チケットの問題の可能性）"
+  exit 1
+}
+
+# staple 確認（オフラインでも Gatekeeper を通すには staple 済みである必要がある）
+stapler validate "$APP_PATH" || {
+  echo "❌ stapler validate 失敗（notarize が未完了 / staple されていない）"
+  exit 1
+}
+
+echo "✅ 署名・公証・staple 全て OK"
 ```
 
 ### 6. パッケージング
@@ -334,21 +379,31 @@ echo "✅ リリース完了: https://github.com/hummer98/mado/releases/tag/v$NE
 
 ## 注意事項
 
-### unsigned バイナリについて
+### 署名・公証について
 
-mado は現状 codesign / notarize をスキップしている（`electrobun.config.ts` の
-defaultConfig で `codesign: false`, `notarize: false`）。
-エンドユーザーが GitHub Releases からダウンロードした `.zip` には
-quarantine 属性が付くため、初回起動前に以下のいずれかの対応が必要:
+mado は Apple Developer ID Application 証明書で署名し、Apple Notary Service で
+公証（notarize）+ staple 済みのバイナリを配布する。役割分担:
 
-```bash
-# quarantine 属性を削除
-xattr -d com.apple.quarantine /Applications/mado.app
+- **codesign**: Electrobun が担当（`build.mac.codesign: true`）。helper / launcher /
+  framework / dmg を含めて deep に署名する。
+- **notarize + staple**: fastlane が担当（`fastlane/Fastfile` の `notarize_app` lane）。
+  `xcrun notarytool` を呼び、`.app` と `.dmg` を公証して staple する。
+  PEM → `.p8` の path 化は fastlane の `app_store_connect_api_key` action が
+  tempfile で完結処理する（永続化しない）。
 
-# または右クリック → 開く → 「開く」を選択
-```
+ローカル実行時に必要な env（既に `~/git/.envrc` で揃っている前提）:
 
-README / README.ja.md にもエンドユーザー向けの手順として同内容を記載すること。
+| env | 用途 | 取得元 |
+|---|---|---|
+| `ELECTROBUN_DEVELOPER_ID` | codesign identity 文字列 | `security find-identity -p codesigning -v` |
+| `APP_STORE_CONNECT_API_KEY_KEY_ID` | notarize Key ID | App Store Connect |
+| `APP_STORE_CONNECT_API_KEY_ISSUER_ID` | notarize Issuer ID | App Store Connect |
+| `APP_STORE_CONNECT_API_KEY_KEY` | `.p8` の PEM 中身（改行込み） | App Store Connect |
+
+初回セットアップ手順は **`docs/signing-setup.md`** を参照。
+
+CI 上では GitHub Secrets から同等の env を注入する。
+詳細は `docs/release-automation.md` を参照（Phase 2 で整備予定）。
 
 ### リリース失敗時のロールバック
 

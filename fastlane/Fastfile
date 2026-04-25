@@ -1,0 +1,66 @@
+# mado fastlane lanes
+#
+# 役割: Electrobun が codesign 済みの .app / .dmg を fastlane の notarize action で
+# Apple Notary Service に提出 → staple する。codesign 自体は Electrobun が helper /
+# launcher / framework を含めて deep に行うため、fastlane では署名しない。
+#
+# 必要な env (~/git/.envrc などで定義済み想定):
+#   APP_STORE_CONNECT_API_KEY_KEY_ID
+#   APP_STORE_CONNECT_API_KEY_ISSUER_ID
+#   APP_STORE_CONNECT_API_KEY_KEY     (PEM の中身そのまま、改行込み)
+#
+# 実行:
+#   bun run build:prod                          # codesign 済み .app と .dmg を生成
+#   bundle exec fastlane mac notarize_app       # 公証 + staple
+#
+# 詳細: docs/signing-setup.md
+
+default_platform(:mac)
+
+# fastlane は実行時に fastlane/ ディレクトリへ cwd を変更するため、
+# プロジェクトルート起点で .app / .dmg を解決する。
+PROJECT_ROOT = File.expand_path("..", __dir__).freeze
+BUNDLE_ID    = "com.ridgeroot.mado"
+DEFAULT_APP  = File.join(PROJECT_ROOT, "build/stable-macos-arm64/mado.app").freeze
+DMG_CANDIDATES = [
+  File.join(PROJECT_ROOT, "artifacts/stable-macos-arm64-mado.dmg"),
+  File.join(PROJECT_ROOT, "build/stable-macos-arm64/mado.dmg"),
+].freeze
+
+platform :mac do
+  desc "Notarize the Electrobun-signed mado.app and dmg"
+  lane :notarize_app do
+    api_key = app_store_connect_api_key(
+      duration: 1200,
+      in_house: false,
+      set_spaceship_token: false,
+    )
+
+    app_path = ENV["MADO_APP_PATH"] || DEFAULT_APP
+    UI.user_error!("App bundle not found: #{app_path}") unless File.directory?(app_path)
+
+    UI.message("Notarizing #{app_path}...")
+    notarize(
+      package: app_path,
+      bundle_id: BUNDLE_ID,
+      api_key: api_key,
+      print_log: true,
+    )
+
+    dmg_path = DMG_CANDIDATES.find { |p| File.file?(p) }
+    if dmg_path
+      UI.message("Notarizing #{dmg_path}...")
+      notarize(
+        package: dmg_path,
+        bundle_id: BUNDLE_ID,
+        api_key: api_key,
+        try_early_stapling: true,
+        print_log: true,
+      )
+    else
+      UI.important("No .dmg found in #{DMG_CANDIDATES.join(', ')}; skipping dmg notarization")
+    end
+
+    UI.success("Notarization complete")
+  end
+end

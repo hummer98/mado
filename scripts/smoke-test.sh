@@ -22,6 +22,25 @@ if [ ! -x "$LAUNCHER" ]; then
   exit 1
 fi
 
+# 署名検証。`spctl --assess` で「Notarized Developer ID」を検出した場合のみ
+# 詳細検証を行い、それ以外は unsigned / dev ビルドとしてスキップ。
+# `codesign -dv` には Authority 行が含まれないため（`-dvv` 必須）、
+# spctl ベースで判定する方が誤検出が少ない。
+if spctl --assess --type execute --verbose=2 "$APP_PATH" 2>&1 | grep -q "Notarized Developer ID"; then
+  echo "🔐 Notarized Developer ID 署名を検出。検証を実行..."
+  if ! codesign --verify --deep --strict --verbose=2 "$APP_PATH" 2>&1; then
+    echo "❌ codesign 検証失敗"
+    exit 1
+  fi
+  if ! stapler validate "$APP_PATH" 2>&1; then
+    echo "❌ stapler validate 失敗（notarize が未完了 or staple されていない）"
+    exit 1
+  fi
+  echo "✅ 署名・staple 検証 OK"
+else
+  echo "ℹ️  unsigned ビルド（dev または codesign OFF）- 署名検証をスキップ"
+fi
+
 SMOKE_LOG_DIR=$(mktemp -d /tmp/mado-smoke-XXXXXX)
 SMOKE_FILE="$(pwd)/docs/seed.md"
 
@@ -31,24 +50,33 @@ if [ ! -f "$SMOKE_FILE" ]; then
   exit 1
 fi
 
+# Electrobun の launcher は起動時に Resources を self-extracting で更新するため、
+# ビルド成果物の .app に直接 launcher を呼ぶと code signature が壊れて staple
+# ticket が失効する。production 配置（/Applications/mado.app）と同等の独立コピーを
+# 作って起動することで、ビルド成果物の検証可能性を保ったまま起動テストを行う。
+SMOKE_APP_COPY="$SMOKE_LOG_DIR/mado.app"
+ditto "$APP_PATH" "$SMOKE_APP_COPY"
+COPY_LAUNCHER="$SMOKE_APP_COPY/Contents/MacOS/launcher"
+
 echo "📁 ログディレクトリ: $SMOKE_LOG_DIR"
 echo "📄 対象ファイル: $SMOKE_FILE"
+echo "📦 起動用コピー: $SMOKE_APP_COPY"
 
 cleanup() {
   # launcher 経由で起動した bun プロセスを片付ける
-  pkill -f "dev.mado.app" 2>/dev/null || true
+  pkill -f "$SMOKE_APP_COPY" 2>/dev/null || true
   rm -rf "$SMOKE_LOG_DIR"
 }
 trap cleanup EXIT
 
-MADO_LOG_DIR="$SMOKE_LOG_DIR" MADO_FILE="$SMOKE_FILE" "$LAUNCHER" >/dev/null 2>&1 &
+MADO_LOG_DIR="$SMOKE_LOG_DIR" MADO_FILE="$SMOKE_FILE" "$COPY_LAUNCHER" >/dev/null 2>&1 &
 LAUNCHER_PID=$!
 
 # launcher の self-extraction + bun プロセス起動を待つ
 sleep 10
 
-# bun プロセスを停止（ログは既に吐き出されているはず）
-pkill -f "dev.mado.app" 2>/dev/null || true
+# bun プロセスを停止（コピー path で確実に kill する）
+pkill -f "$SMOKE_APP_COPY" 2>/dev/null || true
 wait "$LAUNCHER_PID" 2>/dev/null || true
 
 # ログ確認

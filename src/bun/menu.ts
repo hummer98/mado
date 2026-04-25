@@ -17,6 +17,7 @@ export const FILE_MENU_LABEL = "File";
 // macOS は "Edit" というラベルを手掛かりに Emoji & Symbols 等を自動挿入するため
 // 英名 "Edit" を固定し、多言語化は別タスクで扱う。
 export const EDIT_MENU_LABEL = "Edit";
+export const VIEW_MENU_LABEL = "View";
 export const WINDOW_MENU_LABEL = "Window";
 
 // --- アクション識別子 ---
@@ -24,6 +25,9 @@ export const FILE_OPEN_ACTION = "file:open";
 export const FILE_OPEN_RECENT_ACTION = "file:open-recent";
 export const APP_PREFERENCES_ACTION = "app:preferences";
 export const WINDOW_FOCUS_ACTION = "window:focus";
+export const VIEW_ZOOM_IN_ACTION = "view:zoom-in";
+export const VIEW_ZOOM_OUT_ACTION = "view:zoom-out";
+export const VIEW_ZOOM_RESET_ACTION = "view:zoom-reset";
 
 // --- アクセラレータ (Electrobun は Swift 側へ文字列をそのまま渡す)。
 // GlobalShortcut.register の例に倣い "CommandOrControl+..." 記法を採用するが、
@@ -35,6 +39,11 @@ export const ACCELERATOR_PREFERENCES = "CommandOrControl+,";
 export const ACCELERATOR_OPEN = "CommandOrControl+O";
 export const ACCELERATOR_CLOSE = "CommandOrControl+W";
 export const ACCELERATOR_MINIMIZE = "CommandOrControl+M";
+// Cmd+"+" は Shift+"=" のため "=" で受ける (Electron/Chromium と同じ慣例)。
+// 動かない場合は "CommandOrControl+Plus" → "CommandOrControl+Equal" の順で試す。
+export const ACCELERATOR_ZOOM_IN = "CommandOrControl+=";
+export const ACCELERATOR_ZOOM_OUT = "CommandOrControl+-";
+export const ACCELERATOR_ZOOM_RESET = "CommandOrControl+0";
 
 // --- メニューラベル (role 既定値があるものはネイティブ側に任せるため未使用) ---
 const LABEL_PREFERENCES = "Preferences...";
@@ -74,6 +83,12 @@ export interface MenuDeps {
     canChooseDirectory?: boolean;
     allowsMultipleSelection?: boolean;
   }) => Promise<string[]>;
+  /** View > 拡大 (⌘+) ハンドラ。WebView 側の __MADO_ZOOM_IN__ を呼ぶ想定。 */
+  zoomIn: () => void;
+  /** View > 縮小 (⌘-) ハンドラ。WebView 側の __MADO_ZOOM_OUT__ を呼ぶ想定。 */
+  zoomOut: () => void;
+  /** View > 実寸 (⌘0) ハンドラ。WebView 側の __MADO_ZOOM_RESET__ を呼ぶ想定。 */
+  zoomReset: () => void;
 }
 
 /**
@@ -170,7 +185,31 @@ export function buildApplicationMenu(deps: MenuDeps): ApplicationMenuItemConfig[
     submenu: windowSubmenu,
   };
 
-  return [appMenu, fileMenu, editMenu, windowMenu];
+  // View メニュー: ⌘+/⌘-/⌘0 で .markdown-body を 50-200% ズーム (T032)。
+  // クリックハンドラは dispatchMenuAction → deps.zoomIn/Out/Reset を経由して
+  // WebView の __MADO_ZOOM_* グローバル関数に到達する。
+  const viewMenu: ApplicationMenuItemConfig = {
+    label: VIEW_MENU_LABEL,
+    submenu: [
+      {
+        label: "拡大",
+        action: VIEW_ZOOM_IN_ACTION,
+        accelerator: ACCELERATOR_ZOOM_IN,
+      },
+      {
+        label: "縮小",
+        action: VIEW_ZOOM_OUT_ACTION,
+        accelerator: ACCELERATOR_ZOOM_OUT,
+      },
+      {
+        label: "実寸",
+        action: VIEW_ZOOM_RESET_ACTION,
+        accelerator: ACCELERATOR_ZOOM_RESET,
+      },
+    ],
+  };
+
+  return [appMenu, fileMenu, editMenu, viewMenu, windowMenu];
 }
 
 /**
@@ -233,6 +272,19 @@ export async function dispatchMenuAction(
       return;
     }
     deps.focusWindowById(event.data.winId);
+    return;
+  }
+
+  if (event.action === VIEW_ZOOM_IN_ACTION) {
+    deps.zoomIn();
+    return;
+  }
+  if (event.action === VIEW_ZOOM_OUT_ACTION) {
+    deps.zoomOut();
+    return;
+  }
+  if (event.action === VIEW_ZOOM_RESET_ACTION) {
+    deps.zoomReset();
     return;
   }
 
