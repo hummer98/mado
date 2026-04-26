@@ -167,6 +167,82 @@
       margin: 1em 0;
     }
 
+    /* T033: Mermaid 個別ズームのラッパー。
+       `.mermaid` の子として配置され、親の flex 中央揃えに乗る。 */
+    .mermaid-zoom-wrapper {
+      position: relative;
+      overflow: hidden;
+      /* ctrlKey wheel (pinch) のみ preventDefault する運用。
+         iPad / 外部タッチパネル接続時の縦スクロールを守るため pan-y を明示する。 */
+      touch-action: pan-y;
+      max-width: 100%;
+    }
+
+    .mermaid-zoom-wrapper > svg {
+      transform-origin: 0 0;
+      /* pinch 中の focal-point ドリフトを避けるため、transition は基本 off。
+         ボタン操作時のみ JS から一時的に付与する。 */
+      transition: none;
+      will-change: transform;
+      cursor: default;
+      user-select: none;
+    }
+
+    .mermaid-zoom-wrapper.is-zoomed > svg {
+      cursor: grab;
+    }
+    .mermaid-zoom-wrapper.is-panning > svg {
+      cursor: grabbing;
+    }
+
+    .mermaid-zoom-controls {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      display: none;
+      gap: 4px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #d1d9e0;
+      border-radius: 6px;
+      padding: 2px;
+      z-index: 1;
+    }
+    .mermaid-zoom-wrapper:hover .mermaid-zoom-controls,
+    .mermaid-zoom-wrapper:focus-within .mermaid-zoom-controls {
+      display: flex;
+    }
+
+    .mermaid-zoom-controls button {
+      background: transparent;
+      border: none;
+      padding: 4px 8px;
+      cursor: pointer;
+      font: inherit;
+      color: inherit;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    .mermaid-zoom-controls button:hover {
+      background: #eaeef2;
+    }
+    .mermaid-zoom-controls button:focus-visible {
+      outline: 2px solid #0969da;
+      outline-offset: 1px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .mermaid-zoom-controls {
+        background: rgba(22, 27, 34, 0.9);
+        border-color: #30363d;
+      }
+      .mermaid-zoom-controls button:hover {
+        background: #21262d;
+      }
+      .mermaid-zoom-controls button:focus-visible {
+        outline-color: #58a6ff;
+      }
+    }
+
     /* Mermaid パースエラーのインライン表示 */
     .mermaid-error {
       background: #fff3cd;
