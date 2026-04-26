@@ -7,7 +7,7 @@ name: Build & Release (codesign + notarize)
 #
 # 詳細設計: .team/tasks/034-... の plan.md を参照。
 # 触らないもの:
-#   - .github/workflows/release.yml (Homebrew Cask 自動更新)
+#   - .github/workflows/update-tap.yml (Homebrew Cask 自動更新)
 #   - electrobun.config.ts / fastlane/Fastfile / scripts/package.sh, smoke-test.sh
 
 on:
@@ -151,7 +151,7 @@ jobs:
 
       # tag push 時のみ release を作成。既存 release との衝突は upload --clobber で吸収
       # (CI 二重起動 / retry 時の冪等性確保)。draft / prerelease は使わない
-      # (publish しないと release.yml の Homebrew Cask 更新が発火しないため)。
+      # (publish しないと update-tap.yml の Homebrew Cask 更新が発火しないため)。
       - name: Create GitHub Release
         if: github.event_name == 'push'
         env:

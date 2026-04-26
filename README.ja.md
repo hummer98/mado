@@ -51,8 +51,7 @@ brew update && brew upgrade --cask mado
 
 新バージョンがリリースされると GitHub Actions が Cask を自動更新します。
 
-> 現時点で mado は署名されていません。macOS Gatekeeper が初回起動を弾く場合は以下を実行してください:
-> `xattr -dr com.apple.quarantine /Applications/mado.app`
+mado は Apple Developer ID で署名・公証済みのため、macOS でそのまま起動できます (追加の回避操作は不要です)。
 
 ソースからビルドする場合は下記の [Development](#development) セクションを参照してください。
 

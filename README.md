@@ -51,8 +51,7 @@ brew update && brew upgrade --cask mado
 
 Cask releases are auto-updated by GitHub Actions when a new version is published.
 
-> mado is currently unsigned. If macOS Gatekeeper blocks the first launch, run:
-> `xattr -dr com.apple.quarantine /Applications/mado.app`
+mado is signed and notarized with an Apple Developer ID, so it launches on macOS without any extra workaround.
 
 For source builds, see [Development](#development) below.
 
