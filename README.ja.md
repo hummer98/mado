@@ -69,6 +69,9 @@ mado https://...         # URL を開く(将来対応)
 
 ファイルの変更は自動検知され、スクロール位置を保ったまま再描画されます。
 
+起動後はシェルが即解放され、Ctrl+C や端末を閉じても mado は生き残ります。
+デバッグ目的で前景動作させたい場合は `MADO_FOREGROUND=1 mado ...` を使ってください。
+
 ## 仕組み
 
 mado は [Electrobun](https://electrobun.dev) — [Bun](https://bun.sh) と macOS ネイティブ WKWebView を組み合わせた軽量フレームワーク — の上に構築されています。Bun プロセスが CLI 引数をパースし、ファイルを watch し、WebSocket 経由で WebView に更新を push します。WebView 側では `marked` + `mermaid` が Markdown を描画します。

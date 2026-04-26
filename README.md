@@ -69,6 +69,10 @@ mado https://...         # open a URL (planned)
 
 Changes to the file are detected automatically and the view updates without losing your scroll position.
 
+The window keeps running after you close the terminal or press Ctrl+C in the
+shell. Set `MADO_FOREGROUND=1` to keep mado attached to the foreground for
+debugging.
+
 ## How it works
 
 mado is built on [Electrobun](https://electrobun.dev) — a lightweight framework combining [Bun](https://bun.sh) with the native macOS WKWebView. A thin Bun process parses CLI args, watches the file, and pushes updates over WebSocket to the WebView, which renders Markdown with `marked` + `mermaid`.

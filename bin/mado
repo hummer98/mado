@@ -29,4 +29,19 @@ if [ -n "${1:-}" ]; then
   export MADO_FILE
 fi
 
-exec "$LAUNCHER"
+if [ "${MADO_FOREGROUND:-}" = "1" ]; then
+  # 前景モード: 従来動作。Ctrl+C で落ちる、stdout/stderr 直結。
+  exec "$LAUNCHER"
+else
+  # デタッチモード（デフォルト）: シェルを即解放、SIGHUP 遮断。
+  # ログディレクトリは src/lib/logger.ts の getLogDir() と同じ優先順位で算出する。
+  # （logger.ts の getLogDir() を変更したらここも追従させること）
+  if [ -n "${MADO_LOG_DIR:-}" ]; then
+    LOG_DIR="$MADO_LOG_DIR"
+  else
+    LOG_DIR="${TMPDIR:-/tmp/}"
+    LOG_DIR="${LOG_DIR%/}/mado"
+  fi
+  echo "[mado] log dir: $LOG_DIR (latest: ls -t \"$LOG_DIR\" | head -1)" >&2
+  ( nohup "$LAUNCHER" </dev/null >/dev/null 2>&1 & disown ) &
+fi
