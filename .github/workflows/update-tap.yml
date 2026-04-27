@@ -102,9 +102,9 @@ jobs:
             || { echo "::error::version update failed"; exit 1; }
           grep -q "sha256 \"$SHA256\"" Casks/mado.rb \
             || { echo "::error::sha256 update failed"; exit 1; }
-          # url 行が新 tag を参照していることも確認（v#{version} 補間の健全性担保）
-          grep -q "v$VERSION" Casks/mado.rb \
-            || { echo "::error::url/version reference not found in Casks/mado.rb"; exit 1; }
+          # url 行が v#{version} 補間形式であることを確認（リテラル version 文字列は不要）
+          grep -q 'v#{version}' Casks/mado.rb \
+            || { echo "::error::url does not use v#{version} interpolation in Casks/mado.rb"; exit 1; }
 
       - name: Commit & push
         working-directory: tap
