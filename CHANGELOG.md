@@ -6,8 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-28
+
 ### Added
 - View メニュー: 拡大 (⌘+) / 縮小 (⌘-) / 実寸 (⌘0) で Markdown 本文を 50%〜200% にズーム (T032)
+- detach mado launcher by default; MADO_FOREGROUND=1 escape hatch (T039)
+
+### Fixed
+- zoom-in keybinding on JIS keyboard (⌘+ now uses Plus accelerator) (T032)
+
+### Changed
+- app icon added to bundle
 
 ## [0.2.0] - 2026-04-21
 
