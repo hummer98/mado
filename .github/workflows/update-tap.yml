@@ -4,6 +4,10 @@ name: Update Homebrew Cask on Release
 # Casks/mado.rb を自動更新する。Casks/mado.rb の現物は mado 本体には
 # 存在せず、workflow 実行時に actions/checkout で tap リポジトリを
 # clone してから sed で書き換える。詳細は docs/release-automation.md を参照。
+#
+# 認証: PAT ではなく GitHub App (hummer98-tap-updater) を使用する。
+# APP_ID / APP_PRIVATE_KEY を secrets に登録し、
+# actions/create-github-app-token でインストールトークンを取得して checkout する。
 
 on:
   release:
@@ -74,11 +78,20 @@ jobs:
           SHA=$(shasum -a 256 mado.zip | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: homebrew-mado
+          owner: hummer98
+
       - name: Checkout tap repo
         uses: actions/checkout@v4
         with:
           repository: hummer98/homebrew-mado
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: tap
 
       - name: Update Casks/mado.rb
