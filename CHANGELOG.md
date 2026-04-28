@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-29
+
+### Added
+- add Markdown in-page search (T043)
+- add View > Wide Layout toggle (T042)
+- implement File > Open Recent submenu (T041)
+- add ja/en i18n support for menu labels
+- add --version / -v flag to bin/mado
+
+### Changed
+- ci: replace PAT with GitHub App token in update-tap.yml
+- fix(ci): fix url verification check in update-tap.yml
+
+
 ## [0.3.0] - 2026-04-28
 
 ### Added
