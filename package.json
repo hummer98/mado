@@ -1,6 +1,6 @@
 {
   "name": "mado",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "CLI-first Markdown viewer built with Electrobun",
   "license": "MIT",
   "author": "Yuji Yamamoto",
