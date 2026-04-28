@@ -197,6 +197,11 @@ async function render(markdownText: string, filePath: string): Promise<void> {
     contentEl.style.zoom = String(currentZoom);
   }
 
+  // Wide Layout (T042): 同様のフェイルセーフ。enabled=true 時のみ inline 復元。
+  if (wideLayoutEnabled) {
+    contentEl.style.maxWidth = "none";
+  }
+
   lastRenderedFilePath = filePath;
 }
 
@@ -454,6 +459,8 @@ declare global {
     __MADO_ZOOM_OUT__: () => void;
     /** View > 実寸 (⌘0) から executeJavascript で呼び出される (T032) */
     __MADO_ZOOM_RESET__: () => void;
+    /** View > Wide Layout から executeJavascript で呼び出される (T042) */
+    __MADO_SET_WIDE_LAYOUT__: (enabled: boolean) => void;
     /** Electrobun のプリロードが提供する host-message 送信関数 */
     __electrobunSendToHost?: (data: unknown) => void;
   }
@@ -505,6 +512,27 @@ window.__MADO_ZOOM_OUT__ = (): void => {
 };
 window.__MADO_ZOOM_RESET__ = (): void => {
   applyZoom(ZOOM_DEFAULT);
+};
+
+// --- Wide Layout 制御 (T042) ---
+//
+// `.markdown-body` (= #content) の inline style.maxWidth を切り替える。
+// enabled=true → 'none' でウィンドウ幅にフィット
+// enabled=false → '' で CSS 既定値 (980px) に復元
+//
+// 状態をモジュール変数に保持するのは render() 後のフェイルセーフ目的（zoom と同パターン）。
+let wideLayoutEnabled = false;
+
+function applyWideLayout(enabled: boolean): void {
+  wideLayoutEnabled = enabled;
+  const el = document.getElementById("content");
+  if (!el) return;
+  el.style.maxWidth = enabled ? "none" : "";
+  console.log(`[mado] wide_layout_changed enabled=${enabled}`);
+}
+
+window.__MADO_SET_WIDE_LAYOUT__ = (enabled: boolean): void => {
+  applyWideLayout(Boolean(enabled));
 };
 
 console.log("[mado] renderer_started");

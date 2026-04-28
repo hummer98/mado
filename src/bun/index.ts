@@ -59,6 +59,8 @@ import {
   loadRecentFiles,
   removeRecentFile,
 } from "../lib/recent-files";
+import { loadPreferences, savePreferences } from "../lib/preferences";
+import type { Preferences } from "../lib/preferences";
 
 /**
  * Markdown ファイルを読み込む。失敗時はフォールバックコンテンツを返す。
@@ -246,6 +248,10 @@ async function main(): Promise<void> {
   // 明示的なユニオン型へ widen する（plan §5 Step 3-4）。
   let recentFiles: string[] = loadRecentFiles();
   let menuCtrl = null as { rebuild: () => void } | null;
+
+  // グローバル preferences (T042): View > Wide Layout など。
+  // 永続化ファイルは ~/Library/Application Support/mado/preferences.json
+  let preferences: Preferences = loadPreferences();
 
   // 1. CLI 引数パース → 起動モード決定
   const parseResult = parseCliArgs(process.argv);
@@ -684,6 +690,14 @@ async function main(): Promise<void> {
       win.webview.executeJavascript(`window.__MADO_WS_CONNECT__(${wsServer.port})`);
     }
 
+    // T042: 起動時の Wide Layout 状態を WebView に反映する。
+    // executeJavascript は逐次実行されるため、最初の state メッセージで render() が
+    // 走る前に maxWidth が設定され、レイアウトのちらつきが起きない。
+    // did-navigate 経由で WebView module が再評価されてもこのハンドラで再適用される。
+    win.webview.executeJavascript(
+      `window.__MADO_SET_WIDE_LAYOUT__(${preferences.wideLayout})`,
+    );
+
     // watcher を起動（既に動いていなければ）
     if (!watcher) {
       syncWatcherToActive();
@@ -793,6 +807,21 @@ async function main(): Promise<void> {
     zoomIn: () => win.webview.executeJavascript("window.__MADO_ZOOM_IN__()"),
     zoomOut: () => win.webview.executeJavascript("window.__MADO_ZOOM_OUT__()"),
     zoomReset: () => win.webview.executeJavascript("window.__MADO_ZOOM_RESET__()"),
+    // View > Wide Layout (T042): preferences.json でグローバル永続化。
+    // checked 表示は build 時に isWideLayout() を読むため、toggle 後は menuCtrl.rebuild() が必須。
+    // ※ WebView 側でも applyWideLayout が `console.log` を出す（Zoom と異なり二重出力は意図的：
+    //   Bun 側ログは toggle 操作の監査、WebView 側ログは DOM 反映の事実を別系統で残す）。
+    isWideLayout: () => preferences.wideLayout,
+    toggleWideLayout: () => {
+      preferences = { ...preferences, wideLayout: !preferences.wideLayout };
+      savePreferences(preferences);
+      log("wide_layout_toggled", { wideLayout: preferences.wideLayout });
+      // ※ boolean 限定。値域を広げる場合は JSON.stringify を介すこと。
+      win.webview.executeJavascript(
+        `window.__MADO_SET_WIDE_LAYOUT__(${preferences.wideLayout})`,
+      );
+      if (menuCtrl) menuCtrl.rebuild();
+    },
     // Open Recent (T041): 履歴はメインプロセス側の `recentFiles` で一元管理する。
     // listRecentFiles はメニュー再構築時に毎回呼ばれるためコピーを返す（変更を漏らさない）。
     listRecentFiles: () => recentFiles.slice(),

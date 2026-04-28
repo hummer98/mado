@@ -22,6 +22,7 @@ export type MenuLabelKey =
   | "zoomIn"
   | "zoomOut"
   | "actualSize"
+  | "wideLayout"
   | "hide"
   | "hideOthers"
   | "showAll"
@@ -45,6 +46,7 @@ const MENU_LABELS: Record<Locale, Record<MenuLabelKey, string>> = {
     zoomIn: "Zoom In",
     zoomOut: "Zoom Out",
     actualSize: "Actual Size",
+    wideLayout: "Wide Layout",
     hide: "Hide mado",
     hideOthers: "Hide Others",
     showAll: "Show All",
@@ -66,6 +68,7 @@ const MENU_LABELS: Record<Locale, Record<MenuLabelKey, string>> = {
     zoomIn: "拡大",
     zoomOut: "縮小",
     actualSize: "実寸大",
+    wideLayout: "ワイド表示",
     hide: "mado を隠す",
     hideOthers: "ほかを隠す",
     showAll: "すべてを表示",

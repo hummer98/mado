@@ -27,6 +27,8 @@ export const WINDOW_FOCUS_ACTION = "window:focus";
 export const VIEW_ZOOM_IN_ACTION = "view:zoom-in";
 export const VIEW_ZOOM_OUT_ACTION = "view:zoom-out";
 export const VIEW_ZOOM_RESET_ACTION = "view:zoom-reset";
+/** View > Wide Layout（toggle）。チェック状態は deps.isWideLayout() を反映 */
+export const VIEW_TOGGLE_WIDE_LAYOUT_ACTION = "view:toggle-wide-layout";
 
 // --- アクセラレータ (Electrobun は Swift 側へ文字列をそのまま渡す)。
 // GlobalShortcut.register の例に倣い "CommandOrControl+..." 記法を採用するが、
@@ -89,6 +91,10 @@ export interface MenuDeps {
   zoomOut: () => void;
   /** View > 実寸 (⌘0) ハンドラ。WebView 側の __MADO_ZOOM_RESET__ を呼ぶ想定。 */
   zoomReset: () => void;
+  /** View > Wide Layout の現在状態を返す（チェックマーク表示用） */
+  isWideLayout: () => boolean;
+  /** View > Wide Layout のトグル（保存 + WebView 反映 + メニュー rebuild は呼び出し側で） */
+  toggleWideLayout: () => void;
   /** Open Recent submenu に展開する履歴一覧（新しい順、絶対パス） */
   listRecentFiles: () => string[];
   /** Clear Menu 押下時に履歴をクリアする */
@@ -205,6 +211,9 @@ export function buildApplicationMenu(deps: MenuDeps, locale: Locale = detectLoca
   // View メニュー: ⌘+/⌘-/⌘0 で .markdown-body を 50-200% ズーム (T032)。
   // クリックハンドラは dispatchMenuAction → deps.zoomIn/Out/Reset を経由して
   // WebView の __MADO_ZOOM_* グローバル関数に到達する。
+  // Wide Layout (T042): 末尾に divider + toggle 項目を追加。チェックは
+  // build 時に deps.isWideLayout() で固定されるため、状態変化時は menuCtrl.rebuild()
+  // が必要（呼び出し側で対応）。accelerator は付けない。
   const viewMenu: ApplicationMenuItemConfig = {
     label: t("view"),
     submenu: [
@@ -222,6 +231,12 @@ export function buildApplicationMenu(deps: MenuDeps, locale: Locale = detectLoca
         label: t("actualSize"),
         action: VIEW_ZOOM_RESET_ACTION,
         accelerator: ACCELERATOR_ZOOM_RESET,
+      },
+      { type: "divider" },
+      {
+        label: t("wideLayout"),
+        action: VIEW_TOGGLE_WIDE_LAYOUT_ACTION,
+        checked: deps.isWideLayout(),
       },
     ],
   };
@@ -348,6 +363,10 @@ export async function dispatchMenuAction(
   }
   if (event.action === VIEW_ZOOM_RESET_ACTION) {
     deps.zoomReset();
+    return;
+  }
+  if (event.action === VIEW_TOGGLE_WIDE_LAYOUT_ACTION) {
+    deps.toggleWideLayout();
     return;
   }
 

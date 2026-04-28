@@ -16,6 +16,7 @@ import {
   VIEW_ZOOM_IN_ACTION,
   VIEW_ZOOM_OUT_ACTION,
   VIEW_ZOOM_RESET_ACTION,
+  VIEW_TOGGLE_WIDE_LAYOUT_ACTION,
   ACCELERATOR_QUIT,
   ACCELERATOR_HIDE,
   ACCELERATOR_HIDE_OTHERS,
@@ -46,6 +47,8 @@ function makeDeps(overrides: Partial<MenuDeps> = {}): MenuDeps {
     zoomIn: () => {},
     zoomOut: () => {},
     zoomReset: () => {},
+    isWideLayout: () => false,
+    toggleWideLayout: () => {},
     listRecentFiles: () => [],
     clearRecentFiles: () => {},
     removeRecentFile: () => {},
@@ -322,11 +325,12 @@ describe("buildApplicationMenu > View メニュー", () => {
     expect(view.submenu).toBeDefined();
   });
 
-  test("View submenu に 拡大 / 縮小 / 実寸 が正しい順序で並び、action / accelerator が設定される", () => {
+  test("View submenu の zoom 系項目が正しい順序で並び、action / accelerator が設定される", () => {
     const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const view = menu[3] as { submenu?: MenuItem[] };
     const sub = view.submenu!;
-    expect(sub).toHaveLength(3);
+    // T042: zoom×3 + divider + Wide Layout で 5 項目
+    expect(sub).toHaveLength(5);
 
     const zoomIn = sub[0] as {
       label?: string;
@@ -355,6 +359,43 @@ describe("buildApplicationMenu > View メニュー", () => {
     expect(zoomReset.label).toBe(t("actualSize"));
     expect(zoomReset.action).toBe(VIEW_ZOOM_RESET_ACTION);
     expect(zoomReset.accelerator).toBe(ACCELERATOR_ZOOM_RESET);
+  });
+
+  test("View submenu の 4 番目は divider、5 番目は Wide Layout (T042)", () => {
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
+    const view = menu[3] as { submenu?: MenuItem[] };
+    const sub = view.submenu!;
+    expect(sub).toHaveLength(5);
+
+    const divider = sub[3] as { type?: string };
+    expect(divider.type === "divider" || divider.type === "separator").toBe(true);
+
+    const wide = sub[4] as { label?: string; action?: string; checked?: boolean };
+    expect(wide.label).toBe(t("wideLayout"));
+    expect(wide.action).toBe(VIEW_TOGGLE_WIDE_LAYOUT_ACTION);
+  });
+
+  test("isWideLayout()=true なら Wide Layout 項目の checked=true (T042)", () => {
+    const deps = makeDeps({ isWideLayout: () => true });
+    const menu = buildApplicationMenu(deps, TEST_LOCALE);
+    const view = menu[3] as { submenu?: MenuItem[] };
+    const wide = view.submenu![4] as { checked?: boolean };
+    expect(wide.checked).toBe(true);
+  });
+
+  test("isWideLayout()=false なら Wide Layout 項目の checked=false (T042)", () => {
+    const deps = makeDeps({ isWideLayout: () => false });
+    const menu = buildApplicationMenu(deps, TEST_LOCALE);
+    const view = menu[3] as { submenu?: MenuItem[] };
+    const wide = view.submenu![4] as { checked?: boolean };
+    expect(wide.checked).toBe(false);
+  });
+
+  test("ja ロケールで Wide Layout 項目のラベルが「ワイド表示」 (T042)", () => {
+    const menu = buildApplicationMenu(makeDeps(), "ja");
+    const view = menu[3] as { submenu?: MenuItem[] };
+    const wide = view.submenu![4] as { label?: string };
+    expect(wide.label).toBe("ワイド表示");
   });
 });
 
@@ -449,6 +490,13 @@ describe("dispatchMenuAction", () => {
     let called = 0;
     const deps = makeDeps({ zoomReset: () => called++ });
     await dispatchMenuAction({ action: VIEW_ZOOM_RESET_ACTION }, deps);
+    expect(called).toBe(1);
+  });
+
+  test("view:toggle-wide-layout → deps.toggleWideLayout を呼ぶ (T042)", async () => {
+    let called = 0;
+    const deps = makeDeps({ toggleWideLayout: () => called++ });
+    await dispatchMenuAction({ action: VIEW_TOGGLE_WIDE_LAYOUT_ACTION }, deps);
     expect(called).toBe(1);
   });
 
