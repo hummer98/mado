@@ -10,15 +10,8 @@
 
 import type { ApplicationMenuItemConfig } from "electrobun/bun";
 import { log } from "../lib/logger";
-
-// --- トップレベルラベル ---
-export const APP_MENU_LABEL = "mado";
-export const FILE_MENU_LABEL = "File";
-// macOS は "Edit" というラベルを手掛かりに Emoji & Symbols 等を自動挿入するため
-// 英名 "Edit" を固定し、多言語化は別タスクで扱う。
-export const EDIT_MENU_LABEL = "Edit";
-export const VIEW_MENU_LABEL = "View";
-export const WINDOW_MENU_LABEL = "Window";
+import { createT, detectLocale } from "../lib/locale";
+import type { Locale } from "../lib/locale";
 
 // --- アクション識別子 ---
 export const FILE_OPEN_ACTION = "file:open";
@@ -50,10 +43,6 @@ export const ACCELERATOR_ZOOM_IN = "CommandOrControl+Plus";
 export const ACCELERATOR_ZOOM_OUT = "CommandOrControl+-";
 export const ACCELERATOR_ZOOM_RESET = "CommandOrControl+0";
 
-// --- メニューラベル (role 既定値があるものはネイティブ側に任せるため未使用) ---
-const LABEL_PREFERENCES = "Preferences...";
-const LABEL_OPEN = "Open...";
-const LABEL_OPEN_RECENT = "Open Recent";
 
 // --- 対応拡張子 ---
 const MARKDOWN_EXTENSIONS = [".md", ".markdown"];
@@ -108,38 +97,40 @@ export interface MenuClickEvent {
 /**
  * メニュー構造を返す純粋関数。
  * `deps.listWindows()` の戻り値を Window メニュー末尾に展開する以外は静的。
+ * `locale` を省略するとシステムロケールを自動検出する（テストでは明示的に渡す）。
  */
-export function buildApplicationMenu(deps: MenuDeps): ApplicationMenuItemConfig[] {
+export function buildApplicationMenu(deps: MenuDeps, locale: Locale = detectLocale()): ApplicationMenuItemConfig[] {
+  const t = createT(locale);
   const appMenu: ApplicationMenuItemConfig = {
-    label: APP_MENU_LABEL,
+    label: t("app"),
     submenu: [
       { role: "about" },
       { type: "divider" },
       {
-        label: LABEL_PREFERENCES,
+        label: t("preferences"),
         action: APP_PREFERENCES_ACTION,
         accelerator: ACCELERATOR_PREFERENCES,
         enabled: false,
       },
       { type: "divider" },
-      { role: "hide", accelerator: ACCELERATOR_HIDE },
-      { role: "hideOthers", accelerator: ACCELERATOR_HIDE_OTHERS },
-      { role: "showAll" },
+      { role: "hide", label: t("hide"), accelerator: ACCELERATOR_HIDE },
+      { role: "hideOthers", label: t("hideOthers"), accelerator: ACCELERATOR_HIDE_OTHERS },
+      { role: "showAll", label: t("showAll") },
       { type: "divider" },
-      { role: "quit", accelerator: ACCELERATOR_QUIT },
+      { role: "quit", label: t("quit"), accelerator: ACCELERATOR_QUIT },
     ],
   };
 
   const fileMenu: ApplicationMenuItemConfig = {
-    label: FILE_MENU_LABEL,
+    label: t("file"),
     submenu: [
       {
-        label: LABEL_OPEN,
+        label: t("open"),
         action: FILE_OPEN_ACTION,
         accelerator: ACCELERATOR_OPEN,
       },
       {
-        label: LABEL_OPEN_RECENT,
+        label: t("openRecent"),
         action: FILE_OPEN_RECENT_ACTION,
         enabled: false,
         submenu: [],
@@ -151,8 +142,10 @@ export function buildApplicationMenu(deps: MenuDeps): ApplicationMenuItemConfig[
 
   // Edit メニュー: ⌘C 等のショートカットは macOS 既定に任せるため
   // accelerator は明示せず role のみを指定する。
+  // macOS は "Edit" ラベルを手掛かりに Emoji & Symbols 等を自動挿入するため、
+  // 日本語環境でも t("edit") の値が影響しないよう role に任せて動作検証すること。
   const editMenu: ApplicationMenuItemConfig = {
-    label: EDIT_MENU_LABEL,
+    label: t("edit"),
     submenu: [
       { role: "undo" },
       { role: "redo" },
@@ -175,10 +168,10 @@ export function buildApplicationMenu(deps: MenuDeps): ApplicationMenuItemConfig[
     }));
 
   const windowSubmenu: ApplicationMenuItemConfig[] = [
-    { role: "minimize", accelerator: ACCELERATOR_MINIMIZE },
-    { role: "zoom" },
+    { role: "minimize", label: t("minimize"), accelerator: ACCELERATOR_MINIMIZE },
+    { role: "zoom", label: t("zoom") },
     { type: "divider" },
-    { role: "bringAllToFront" },
+    { role: "bringAllToFront", label: t("bringAllToFront") },
   ];
   if (dynamicWindows.length > 0) {
     windowSubmenu.push({ type: "divider" });
@@ -186,7 +179,7 @@ export function buildApplicationMenu(deps: MenuDeps): ApplicationMenuItemConfig[
   }
 
   const windowMenu: ApplicationMenuItemConfig = {
-    label: WINDOW_MENU_LABEL,
+    label: t("window"),
     submenu: windowSubmenu,
   };
 
@@ -194,20 +187,20 @@ export function buildApplicationMenu(deps: MenuDeps): ApplicationMenuItemConfig[
   // クリックハンドラは dispatchMenuAction → deps.zoomIn/Out/Reset を経由して
   // WebView の __MADO_ZOOM_* グローバル関数に到達する。
   const viewMenu: ApplicationMenuItemConfig = {
-    label: VIEW_MENU_LABEL,
+    label: t("view"),
     submenu: [
       {
-        label: "拡大",
+        label: t("zoomIn"),
         action: VIEW_ZOOM_IN_ACTION,
         accelerator: ACCELERATOR_ZOOM_IN,
       },
       {
-        label: "縮小",
+        label: t("zoomOut"),
         action: VIEW_ZOOM_OUT_ACTION,
         accelerator: ACCELERATOR_ZOOM_OUT,
       },
       {
-        label: "実寸",
+        label: t("actualSize"),
         action: VIEW_ZOOM_RESET_ACTION,
         accelerator: ACCELERATOR_ZOOM_RESET,
       },

@@ -7,11 +7,6 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  APP_MENU_LABEL,
-  FILE_MENU_LABEL,
-  EDIT_MENU_LABEL,
-  VIEW_MENU_LABEL,
-  WINDOW_MENU_LABEL,
   FILE_OPEN_ACTION,
   FILE_OPEN_RECENT_ACTION,
   APP_PREFERENCES_ACTION,
@@ -33,6 +28,12 @@ import {
   dispatchMenuAction,
 } from "./menu";
 import type { MenuDeps, MenuClickEvent } from "./menu";
+import { createT } from "../lib/locale";
+import type { Locale } from "../lib/locale";
+
+// テスト中はシステムロケールによらず英語固定で比較する
+const TEST_LOCALE: Locale = "en";
+const t = createT(TEST_LOCALE);
 
 function makeDeps(overrides: Partial<MenuDeps> = {}): MenuDeps {
   return {
@@ -70,22 +71,22 @@ function findByRole(items: MenuItem[], role: string): MenuItem | undefined {
 
 describe("buildApplicationMenu", () => {
   test("5 つのトップレベルメニュー (mado / File / Edit / View / Window) を返す", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     expect(menu).toHaveLength(5);
     assertNormal(menu[0]!);
     assertNormal(menu[1]!);
     assertNormal(menu[2]!);
     assertNormal(menu[3]!);
     assertNormal(menu[4]!);
-    expect((menu[0] as { label?: string }).label).toBe(APP_MENU_LABEL);
-    expect((menu[1] as { label?: string }).label).toBe(FILE_MENU_LABEL);
-    expect((menu[2] as { label?: string }).label).toBe(EDIT_MENU_LABEL);
-    expect((menu[3] as { label?: string }).label).toBe(VIEW_MENU_LABEL);
-    expect((menu[4] as { label?: string }).label).toBe(WINDOW_MENU_LABEL);
+    expect((menu[0] as { label?: string }).label).toBe(t("app"));
+    expect((menu[1] as { label?: string }).label).toBe(t("file"));
+    expect((menu[2] as { label?: string }).label).toBe(t("edit"));
+    expect((menu[3] as { label?: string }).label).toBe(t("view"));
+    expect((menu[4] as { label?: string }).label).toBe(t("window"));
   });
 
   test("Application メニューに role:quit + Cmd+Q accelerator がある", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const app = menu[0] as { submenu?: MenuItem[] };
     expect(app.submenu).toBeDefined();
     const quit = findByRole(app.submenu!, "quit");
@@ -94,7 +95,7 @@ describe("buildApplicationMenu", () => {
   });
 
   test("Application メニューに about / hide / hideOthers / showAll の role 項目が含まれる", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const app = menu[0] as { submenu?: MenuItem[] };
     expect(findByRole(app.submenu!, "about")).toBeDefined();
     const hide = findByRole(app.submenu!, "hide");
@@ -107,7 +108,7 @@ describe("buildApplicationMenu", () => {
   });
 
   test("Preferences は enabled:false かつ APP_PREFERENCES_ACTION を持つ", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const app = menu[0] as { submenu?: MenuItem[] };
     const pref = app.submenu!.find(
       (i) => (i as { action?: string }).action === APP_PREFERENCES_ACTION,
@@ -118,7 +119,7 @@ describe("buildApplicationMenu", () => {
   });
 
   test("File メニューの Open... に file:open + Cmd+O が設定される", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const file = menu[1] as { submenu?: MenuItem[] };
     const open = file.submenu!.find(
       (i) => (i as { action?: string }).action === FILE_OPEN_ACTION,
@@ -129,7 +130,7 @@ describe("buildApplicationMenu", () => {
   });
 
   test("File メニューの Open Recent は enabled:false で空 submenu を持つ", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const file = menu[1] as { submenu?: MenuItem[] };
     const recent = file.submenu!.find(
       (i) => (i as { action?: string }).action === FILE_OPEN_RECENT_ACTION,
@@ -140,7 +141,7 @@ describe("buildApplicationMenu", () => {
   });
 
   test("File メニューに role:close + Cmd+W が含まれる", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const file = menu[1] as { submenu?: MenuItem[] };
     const close = findByRole(file.submenu!, "close");
     expect(close).toBeDefined();
@@ -148,7 +149,7 @@ describe("buildApplicationMenu", () => {
   });
 
   test("Window メニューに minimize / zoom / bringAllToFront の role が含まれる", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const win = menu[4] as { submenu?: MenuItem[] };
     const minimize = findByRole(win.submenu!, "minimize");
     expect(minimize).toBeDefined();
@@ -164,7 +165,7 @@ describe("buildApplicationMenu", () => {
         { id: 2, title: "CHANGELOG.md" },
       ],
     });
-    const menu = buildApplicationMenu(deps);
+    const menu = buildApplicationMenu(deps, TEST_LOCALE);
     const win = menu[4] as { submenu?: MenuItem[] };
     const sub = win.submenu!;
     const dynamicItems = sub.filter(
@@ -180,7 +181,7 @@ describe("buildApplicationMenu", () => {
   });
 
   test("listWindows() が 0 件なら動的項目は展開されない", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const win = menu[4] as { submenu?: MenuItem[] };
     const dynamicItems = win.submenu!.filter(
       (i) => (i as { action?: string }).action === WINDOW_FOCUS_ACTION,
@@ -190,15 +191,15 @@ describe("buildApplicationMenu", () => {
 });
 
 describe("buildApplicationMenu > Edit メニュー", () => {
-  test("Edit メニューは menu[2] に存在し EDIT_MENU_LABEL を持つ", () => {
-    const menu = buildApplicationMenu(makeDeps());
+  test("Edit メニューは menu[2] に存在し t('edit') のラベルを持つ", () => {
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const edit = menu[2] as { label?: string; submenu?: MenuItem[] };
-    expect(edit.label).toBe(EDIT_MENU_LABEL);
+    expect(edit.label).toBe(t("edit"));
     expect(edit.submenu).toBeDefined();
   });
 
   test("Edit submenu に copy / paste / selectAll の role が含まれる", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const edit = menu[2] as { submenu?: MenuItem[] };
     expect(findByRole(edit.submenu!, "copy")).toBeDefined();
     expect(findByRole(edit.submenu!, "paste")).toBeDefined();
@@ -206,7 +207,7 @@ describe("buildApplicationMenu > Edit メニュー", () => {
   });
 
   test("Edit submenu に cut / undo / redo の role が含まれる", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const edit = menu[2] as { submenu?: MenuItem[] };
     expect(findByRole(edit.submenu!, "cut")).toBeDefined();
     expect(findByRole(edit.submenu!, "undo")).toBeDefined();
@@ -214,14 +215,14 @@ describe("buildApplicationMenu > Edit メニュー", () => {
   });
 
   test("Edit submenu に pasteAndMatchStyle / delete の role が含まれる", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const edit = menu[2] as { submenu?: MenuItem[] };
     expect(findByRole(edit.submenu!, "pasteAndMatchStyle")).toBeDefined();
     expect(findByRole(edit.submenu!, "delete")).toBeDefined();
   });
 
   test("Edit submenu の順序は undo → redo → divider → cut → copy → paste → pasteAndMatchStyle → delete → selectAll", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const edit = menu[2] as { submenu?: MenuItem[] };
     const seq = edit.submenu!.map((i) => {
       const type = (i as { type?: string }).type;
@@ -243,15 +244,15 @@ describe("buildApplicationMenu > Edit メニュー", () => {
 });
 
 describe("buildApplicationMenu > View メニュー", () => {
-  test("View メニューは menu[3] に存在し VIEW_MENU_LABEL を持つ", () => {
-    const menu = buildApplicationMenu(makeDeps());
+  test("View メニューは menu[3] に存在し t('view') のラベルを持つ", () => {
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const view = menu[3] as { label?: string; submenu?: MenuItem[] };
-    expect(view.label).toBe(VIEW_MENU_LABEL);
+    expect(view.label).toBe(t("view"));
     expect(view.submenu).toBeDefined();
   });
 
   test("View submenu に 拡大 / 縮小 / 実寸 が正しい順序で並び、action / accelerator が設定される", () => {
-    const menu = buildApplicationMenu(makeDeps());
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const view = menu[3] as { submenu?: MenuItem[] };
     const sub = view.submenu!;
     expect(sub).toHaveLength(3);
@@ -272,15 +273,15 @@ describe("buildApplicationMenu > View メニュー", () => {
       accelerator?: string;
     };
 
-    expect(zoomIn.label).toBe("拡大");
+    expect(zoomIn.label).toBe(t("zoomIn"));
     expect(zoomIn.action).toBe(VIEW_ZOOM_IN_ACTION);
     expect(zoomIn.accelerator).toBe(ACCELERATOR_ZOOM_IN);
 
-    expect(zoomOut.label).toBe("縮小");
+    expect(zoomOut.label).toBe(t("zoomOut"));
     expect(zoomOut.action).toBe(VIEW_ZOOM_OUT_ACTION);
     expect(zoomOut.accelerator).toBe(ACCELERATOR_ZOOM_OUT);
 
-    expect(zoomReset.label).toBe("実寸");
+    expect(zoomReset.label).toBe(t("actualSize"));
     expect(zoomReset.action).toBe(VIEW_ZOOM_RESET_ACTION);
     expect(zoomReset.accelerator).toBe(ACCELERATOR_ZOOM_RESET);
   });
