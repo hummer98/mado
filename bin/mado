@@ -9,6 +9,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# --version / -v: package.json からバージョンを読んで表示して終了
+if [ "${1:-}" = "--version" ] || [ "${1:-}" = "-v" ]; then
+  PKG_JSON="$PROJECT_ROOT/package.json"
+  if command -v jq >/dev/null 2>&1; then
+    VERSION="$(jq -r '.version' "$PKG_JSON")"
+  else
+    VERSION="$(grep '"version"' "$PKG_JSON" | sed 's/.*"version": *"\([^"]*\)".*/\1/')"
+  fi
+  echo "mado $VERSION"
+  exit 0
+fi
+
 # macOS arm64 dev ビルド前提。将来 x64/Linux 対応時はパス検出を柔軟化する
 LAUNCHER="$PROJECT_ROOT/build/dev-macos-arm64/mado-dev.app/Contents/MacOS/launcher"
 
