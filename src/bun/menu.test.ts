@@ -17,6 +17,7 @@ import {
   VIEW_ZOOM_OUT_ACTION,
   VIEW_ZOOM_RESET_ACTION,
   VIEW_TOGGLE_WIDE_LAYOUT_ACTION,
+  EDIT_FIND_ACTION,
   ACCELERATOR_QUIT,
   ACCELERATOR_HIDE,
   ACCELERATOR_HIDE_OTHERS,
@@ -27,6 +28,7 @@ import {
   ACCELERATOR_ZOOM_IN,
   ACCELERATOR_ZOOM_OUT,
   ACCELERATOR_ZOOM_RESET,
+  ACCELERATOR_FIND,
   buildApplicationMenu,
   dispatchMenuAction,
 } from "./menu";
@@ -49,6 +51,7 @@ function makeDeps(overrides: Partial<MenuDeps> = {}): MenuDeps {
     zoomReset: () => {},
     isWideLayout: () => false,
     toggleWideLayout: () => {},
+    showFind: () => {},
     listRecentFiles: () => [],
     clearRecentFiles: () => {},
     removeRecentFile: () => {},
@@ -295,12 +298,14 @@ describe("buildApplicationMenu > Edit メニュー", () => {
     expect(findByRole(edit.submenu!, "delete")).toBeDefined();
   });
 
-  test("Edit submenu の順序は undo → redo → divider → cut → copy → paste → pasteAndMatchStyle → delete → selectAll", () => {
+  test("Edit submenu の順序は undo → redo → divider → cut → copy → paste → pasteAndMatchStyle → delete → selectAll → divider → find (T043)", () => {
     const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const edit = menu[2] as { submenu?: MenuItem[] };
     const seq = edit.submenu!.map((i) => {
       const type = (i as { type?: string }).type;
       if (type === "divider" || type === "separator") return "divider";
+      const action = (i as { action?: string }).action;
+      if (action === EDIT_FIND_ACTION) return "find";
       return (i as { role?: string }).role ?? "(unknown)";
     });
     expect(seq).toEqual([
@@ -313,7 +318,40 @@ describe("buildApplicationMenu > Edit メニュー", () => {
       "pasteAndMatchStyle",
       "delete",
       "selectAll",
+      "divider",
+      "find",
     ]);
+  });
+});
+
+describe("buildApplicationMenu > Edit メニュー > Find... (T043)", () => {
+  test("Edit submenu の最後に Find... 項目があり、CommandOrControl+F が割り当てられている", () => {
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
+    const edit = menu[2] as { submenu?: MenuItem[] };
+    expect(edit.submenu).toBeDefined();
+    const sub = edit.submenu!;
+    const findItem = sub[sub.length - 1]!;
+    assertNormal(findItem);
+    expect((findItem as { label?: string }).label).toBe(t("find"));
+    expect((findItem as { action?: string }).action).toBe(EDIT_FIND_ACTION);
+    expect((findItem as { accelerator?: string }).accelerator).toBe(ACCELERATOR_FIND);
+  });
+
+  test("ja ロケールで「検索...」になる", () => {
+    const menu = buildApplicationMenu(makeDeps(), "ja");
+    const edit = menu[2] as { submenu?: MenuItem[] };
+    const sub = edit.submenu!;
+    const findItem = sub[sub.length - 1] as { label?: string };
+    expect(findItem.label).toBe("検索...");
+  });
+
+  test("Edit submenu の末尾は selectAll → divider → Find... の順", () => {
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
+    const sub = (menu[2] as { submenu: MenuItem[] }).submenu;
+    const tail = sub.slice(-3);
+    expect((tail[0] as { role?: string }).role).toBe("selectAll");
+    expect((tail[1] as { type?: string }).type === "divider" || (tail[1] as { type?: string }).type === "separator").toBe(true);
+    expect((tail[2] as { action?: string }).action).toBe(EDIT_FIND_ACTION);
   });
 });
 
@@ -497,6 +535,13 @@ describe("dispatchMenuAction", () => {
     let called = 0;
     const deps = makeDeps({ toggleWideLayout: () => called++ });
     await dispatchMenuAction({ action: VIEW_TOGGLE_WIDE_LAYOUT_ACTION }, deps);
+    expect(called).toBe(1);
+  });
+
+  test("edit:find → deps.showFind を呼ぶ (T043)", async () => {
+    let called = 0;
+    const deps = makeDeps({ showFind: () => called++ });
+    await dispatchMenuAction({ action: EDIT_FIND_ACTION }, deps);
     expect(called).toBe(1);
   });
 

@@ -29,6 +29,8 @@ export const VIEW_ZOOM_OUT_ACTION = "view:zoom-out";
 export const VIEW_ZOOM_RESET_ACTION = "view:zoom-reset";
 /** View > Wide Layout（toggle）。チェック状態は deps.isWideLayout() を反映 */
 export const VIEW_TOGGLE_WIDE_LAYOUT_ACTION = "view:toggle-wide-layout";
+/** Edit > Find... ⌘F でページ内検索を起動 (T043) */
+export const EDIT_FIND_ACTION = "edit:find";
 
 // --- アクセラレータ (Electrobun は Swift 側へ文字列をそのまま渡す)。
 // GlobalShortcut.register の例に倣い "CommandOrControl+..." 記法を採用するが、
@@ -50,6 +52,7 @@ export const ACCELERATOR_MINIMIZE = "CommandOrControl+M";
 export const ACCELERATOR_ZOOM_IN = "CommandOrControl+Plus";
 export const ACCELERATOR_ZOOM_OUT = "CommandOrControl+-";
 export const ACCELERATOR_ZOOM_RESET = "CommandOrControl+0";
+export const ACCELERATOR_FIND = "CommandOrControl+F";
 
 
 // --- 対応拡張子 ---
@@ -95,6 +98,8 @@ export interface MenuDeps {
   isWideLayout: () => boolean;
   /** View > Wide Layout のトグル（保存 + WebView 反映 + メニュー rebuild は呼び出し側で） */
   toggleWideLayout: () => void;
+  /** Edit > Find... ハンドラ (T043)。WebView 側の __MADO_SHOW_FIND__ を呼ぶ想定。 */
+  showFind: () => void;
   /** Open Recent submenu に展開する履歴一覧（新しい順、絶対パス） */
   listRecentFiles: () => string[];
   /** Clear Menu 押下時に履歴をクリアする */
@@ -169,6 +174,7 @@ export function buildApplicationMenu(deps: MenuDeps, locale: Locale = detectLoca
   // accelerator は明示せず role のみを指定する。
   // macOS は "Edit" ラベルを手掛かりに Emoji & Symbols 等を自動挿入するため、
   // 日本語環境でも t("edit") の値が影響しないよう role に任せて動作検証すること。
+  // T043: 末尾に divider + Find... を追加。⌘F で WebView 側の __MADO_SHOW_FIND__ を呼ぶ。
   const editMenu: ApplicationMenuItemConfig = {
     label: t("edit"),
     submenu: [
@@ -181,6 +187,12 @@ export function buildApplicationMenu(deps: MenuDeps, locale: Locale = detectLoca
       { role: "pasteAndMatchStyle" },
       { role: "delete" },
       { role: "selectAll" },
+      { type: "divider" },
+      {
+        label: t("find"),
+        action: EDIT_FIND_ACTION,
+        accelerator: ACCELERATOR_FIND,
+      },
     ],
   };
 
@@ -367,6 +379,10 @@ export async function dispatchMenuAction(
   }
   if (event.action === VIEW_TOGGLE_WIDE_LAYOUT_ACTION) {
     deps.toggleWideLayout();
+    return;
+  }
+  if (event.action === EDIT_FIND_ACTION) {
+    deps.showFind();
     return;
   }
 

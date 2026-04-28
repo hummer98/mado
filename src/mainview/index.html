@@ -244,6 +244,89 @@
         background: rgba(110, 118, 129, 0.3);
       }
     }
+
+    /* ページ内検索ボックス (T043) */
+    .find-box {
+      position: fixed;
+      top: 12px;
+      right: 16px;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #d1d9e0;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      font-size: 12px;
+      transition: transform 150ms ease-out, opacity 150ms ease-out;
+    }
+    .find-box[hidden] { display: none; }
+    .find-icon {
+      font-size: 13px;
+      color: #57606a;
+    }
+    .find-input {
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      padding: 3px 6px;
+      font: inherit;
+      width: 180px;
+      outline: none;
+    }
+    .find-input:focus { border-color: #0969da; }
+    .find-count {
+      font-variant-numeric: tabular-nums;
+      color: #57606a;
+      min-width: 56px;
+      text-align: center;
+    }
+    .find-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      padding: 2px 6px;
+      cursor: pointer;
+      border-radius: 3px;
+      color: #57606a;
+      font: inherit;
+      line-height: 1;
+    }
+    .find-btn:hover { background: #eaeef2; }
+    .find-btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* CSS Custom Highlight API のハイライト色 */
+    ::highlight(mado-find-all) {
+      background-color: rgba(255, 235, 59, 0.55);
+      color: inherit;
+    }
+    ::highlight(mado-find-current) {
+      background-color: rgba(255, 152, 0, 0.85);
+      color: inherit;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .find-box { transition: none; }
+    }
+    @media (prefers-color-scheme: dark) {
+      .find-box {
+        background: rgba(22, 27, 34, 0.95);
+        border-color: #30363d;
+        color: #e6edf3;
+      }
+      .find-icon { color: #8b949e; }
+      .find-input {
+        background: #0d1117;
+        border-color: #30363d;
+        color: #e6edf3;
+      }
+      .find-input:focus { border-color: #58a6ff; }
+      .find-count { color: #8b949e; }
+      .find-btn { color: #8b949e; }
+      .find-btn:hover { background: #21262d; }
+      ::highlight(mado-find-all) { background-color: rgba(255, 213, 79, 0.45); }
+      ::highlight(mado-find-current) { background-color: rgba(255, 167, 38, 0.85); }
+    }
   </style>
 </head>
 <body>
@@ -260,6 +343,24 @@
       </div>
       <article class="markdown-body" id="content" style="display: none;"></article>
     </main>
+  </div>
+  <!-- ページ内検索ボックス (T043)。初期表示は hidden、⌘F (window.__MADO_SHOW_FIND__) で開く。
+       aria-label / title は __MADO_SET_LOCALE__ で ja/en に切り替わる。 -->
+  <div id="find-box" class="find-box" hidden role="search">
+    <span class="find-icon" aria-hidden="true">🔍</span>
+    <input
+      id="find-input"
+      type="text"
+      class="find-input"
+      placeholder=""
+      autocomplete="off"
+      spellcheck="false"
+      aria-label="Find"
+    >
+    <span id="find-count" class="find-count" aria-live="polite"></span>
+    <button id="find-prev" type="button" class="find-btn" title="Previous match" aria-label="Previous match">↑</button>
+    <button id="find-next" type="button" class="find-btn" title="Next match" aria-label="Next match">↓</button>
+    <button id="find-close" type="button" class="find-btn" title="Close (ESC)" aria-label="Close">✕</button>
   </div>
   <!-- WebView 側 JS（Bun によってバンドルされる） -->
   <script type="module" src="views://mainview/index.js"></script>

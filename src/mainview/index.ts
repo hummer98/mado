@@ -11,6 +11,7 @@ import hljs from "highlight.js";
 import mermaid from "mermaid";
 import { rewriteImageUrls } from "./rewrite-image-urls";
 import { clampZoom, nextZoomIn, nextZoomOut, ZOOM_DEFAULT } from "../lib/zoom-state";
+import { initFind } from "./find";
 
 // --- marked の設定 ---
 
@@ -200,6 +201,13 @@ async function render(markdownText: string, filePath: string): Promise<void> {
   // Wide Layout (T042): 同様のフェイルセーフ。enabled=true 時のみ inline 復元。
   if (wideLayoutEnabled) {
     contentEl.style.maxWidth = "none";
+  }
+
+  // T043: render() のたびに既存検索状態を破棄する。
+  // 同一ファイル Hot Reload でも別ファイル切替でも一律で閉じる仕様。
+  // 古い Range が innerHTML 差し替えで invalid になるため、ハイライト残留を防ぐ。
+  if (typeof window.__MADO_FIND_RESET__ === "function") {
+    window.__MADO_FIND_RESET__();
   }
 
   lastRenderedFilePath = filePath;
@@ -534,5 +542,10 @@ function applyWideLayout(enabled: boolean): void {
 window.__MADO_SET_WIDE_LAYOUT__ = (enabled: boolean): void => {
   applyWideLayout(Boolean(enabled));
 };
+
+// --- ページ内検索 (T043) ---
+// __MADO_SHOW_FIND__ / __MADO_FIND_RESET__ / __MADO_SET_LOCALE__ を window に生やす。
+// DOM (find-box / find-input) は body 末尾に存在する前提（<script type="module"> 同期実行）。
+initFind();
 
 console.log("[mado] renderer_started");

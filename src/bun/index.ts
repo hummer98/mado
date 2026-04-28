@@ -42,6 +42,7 @@ import { decideStartupMode } from "./startup";
 import { computeUpgradeToFileMode } from "../lib/upgrade-mode";
 import { installApplicationMenu } from "./menu";
 import type { WindowSummary } from "./menu";
+import { detectLocale } from "../lib/locale";
 import { buildEntryContextMenu, installEntryContextMenu } from "./context-menu";
 import {
   DEFAULT_BOUNDS,
@@ -698,6 +699,11 @@ async function main(): Promise<void> {
       `window.__MADO_SET_WIDE_LAYOUT__(${preferences.wideLayout})`,
     );
 
+    // T043: 検索ボックスの aria-label / title を locale に合わせて切り替える。
+    win.webview.executeJavascript(
+      `window.__MADO_SET_LOCALE__(${JSON.stringify(detectLocale())})`,
+    );
+
     // watcher を起動（既に動いていなければ）
     if (!watcher) {
       syncWatcherToActive();
@@ -822,6 +828,9 @@ async function main(): Promise<void> {
       );
       if (menuCtrl) menuCtrl.rebuild();
     },
+    // Edit > Find... (T043): WebView 側の __MADO_SHOW_FIND__ を呼ぶ。
+    // ログは WebView 側 showFind が出すため Bun 側では二重記録しない（zoom と同じ判断）。
+    showFind: () => win.webview.executeJavascript("window.__MADO_SHOW_FIND__()"),
     // Open Recent (T041): 履歴はメインプロセス側の `recentFiles` で一元管理する。
     // listRecentFiles はメニュー再構築時に毎回呼ばれるためコピーを返す（変更を漏らさない）。
     listRecentFiles: () => recentFiles.slice(),
