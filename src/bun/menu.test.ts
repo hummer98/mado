@@ -9,6 +9,8 @@ import { describe, expect, test } from "bun:test";
 import {
   FILE_OPEN_ACTION,
   FILE_OPEN_RECENT_ACTION,
+  FILE_OPEN_RECENT_ITEM_ACTION,
+  FILE_CLEAR_RECENT_ACTION,
   APP_PREFERENCES_ACTION,
   WINDOW_FOCUS_ACTION,
   VIEW_ZOOM_IN_ACTION,
@@ -44,6 +46,10 @@ function makeDeps(overrides: Partial<MenuDeps> = {}): MenuDeps {
     zoomIn: () => {},
     zoomOut: () => {},
     zoomReset: () => {},
+    listRecentFiles: () => [],
+    clearRecentFiles: () => {},
+    removeRecentFile: () => {},
+    fileExists: () => true,
     ...overrides,
   };
 }
@@ -129,7 +135,7 @@ describe("buildApplicationMenu", () => {
     expect((open as { enabled?: boolean }).enabled).not.toBe(false);
   });
 
-  test("File メニューの Open Recent は enabled:false で空 submenu を持つ", () => {
+  test("listRecentFiles が空のとき Open Recent は enabled:false で submenu は [Clear Menu (disabled)] のみ", () => {
     const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
     const file = menu[1] as { submenu?: MenuItem[] };
     const recent = file.submenu!.find(
@@ -137,7 +143,72 @@ describe("buildApplicationMenu", () => {
     );
     expect(recent).toBeDefined();
     expect((recent as { enabled?: boolean }).enabled).toBe(false);
-    expect((recent as { submenu?: MenuItem[] }).submenu).toEqual([]);
+    const sub = (recent as { submenu?: MenuItem[] }).submenu;
+    expect(sub).toBeDefined();
+    expect(sub!.length).toBe(1);
+    const clear = sub![0] as { action?: string; enabled?: boolean; label?: string };
+    expect(clear.action).toBe(FILE_CLEAR_RECENT_ACTION);
+    expect(clear.enabled).toBe(false);
+    expect(clear.label).toBe(t("clearRecent"));
+  });
+
+  test("listRecentFiles が 2 件返るとき submenu は [item1, item2, divider, Clear Menu (enabled)]", () => {
+    const deps = makeDeps({
+      listRecentFiles: () => ["/tmp/a.md", "/tmp/b.md"],
+    });
+    const menu = buildApplicationMenu(deps, TEST_LOCALE);
+    const file = menu[1] as { submenu?: MenuItem[] };
+    const recent = file.submenu!.find(
+      (i) => (i as { action?: string }).action === FILE_OPEN_RECENT_ACTION,
+    );
+    expect(recent).toBeDefined();
+    expect((recent as { enabled?: boolean }).enabled).not.toBe(false);
+    const sub = (recent as { submenu?: MenuItem[] }).submenu!;
+    expect(sub.length).toBe(4);
+
+    const item1 = sub[0] as { label?: string; action?: string; data?: { path?: string } };
+    expect(item1.label).toBe("a.md");
+    expect(item1.action).toBe(FILE_OPEN_RECENT_ITEM_ACTION);
+    expect(item1.data?.path).toBe("/tmp/a.md");
+
+    const item2 = sub[1] as { label?: string; action?: string; data?: { path?: string } };
+    expect(item2.label).toBe("b.md");
+    expect(item2.action).toBe(FILE_OPEN_RECENT_ITEM_ACTION);
+    expect(item2.data?.path).toBe("/tmp/b.md");
+
+    const divider = sub[2] as { type?: string };
+    expect(divider.type === "divider" || divider.type === "separator").toBe(true);
+
+    const clear = sub[3] as { action?: string; enabled?: boolean };
+    expect(clear.action).toBe(FILE_CLEAR_RECENT_ACTION);
+    expect(clear.enabled).not.toBe(false);
+  });
+
+  test("Open Recent 親項目の action は FILE_OPEN_RECENT_ACTION のまま（互換維持）", () => {
+    const menu = buildApplicationMenu(makeDeps(), TEST_LOCALE);
+    const file = menu[1] as { submenu?: MenuItem[] };
+    const recent = file.submenu!.find(
+      (i) => (i as { action?: string }).action === FILE_OPEN_RECENT_ACTION,
+    );
+    expect(recent).toBeDefined();
+  });
+
+  test("submenu 構築時に存在しないファイルは fileExists でフィルタされる", () => {
+    const deps = makeDeps({
+      listRecentFiles: () => ["/tmp/a.md", "/tmp/missing.md"],
+      fileExists: (p) => p !== "/tmp/missing.md",
+    });
+    const menu = buildApplicationMenu(deps, TEST_LOCALE);
+    const file = menu[1] as { submenu?: MenuItem[] };
+    const recent = file.submenu!.find(
+      (i) => (i as { action?: string }).action === FILE_OPEN_RECENT_ACTION,
+    );
+    const sub = (recent as { submenu?: MenuItem[] }).submenu!;
+    const items = sub.filter(
+      (i) => (i as { action?: string }).action === FILE_OPEN_RECENT_ITEM_ACTION,
+    );
+    expect(items).toHaveLength(1);
+    expect((items[0] as { data?: { path?: string } }).data?.path).toBe("/tmp/a.md");
   });
 
   test("File メニューに role:close + Cmd+W が含まれる", () => {
@@ -384,5 +455,74 @@ describe("dispatchMenuAction", () => {
   test("未知 action は何もしない (例外を投げない)", async () => {
     const deps = makeDeps();
     await dispatchMenuAction({ action: "unknown:action" }, deps);
+  });
+
+  test("file:open-recent-item → fileExists:true なら openMarkdownFile を呼ぶ", async () => {
+    const opened: string[] = [];
+    const removed: string[] = [];
+    const deps = makeDeps({
+      openMarkdownFile: (p) => opened.push(p),
+      removeRecentFile: (p) => removed.push(p),
+      fileExists: () => true,
+    });
+    await dispatchMenuAction(
+      { action: FILE_OPEN_RECENT_ITEM_ACTION, data: { path: "/x.md" } },
+      deps,
+    );
+    expect(opened).toEqual(["/x.md"]);
+    expect(removed).toEqual([]);
+  });
+
+  test("file:open-recent-item で data が不正なら何もしない", async () => {
+    const opened: string[] = [];
+    const removed: string[] = [];
+    const deps = makeDeps({
+      openMarkdownFile: (p) => opened.push(p),
+      removeRecentFile: (p) => removed.push(p),
+    });
+    await dispatchMenuAction(
+      { action: FILE_OPEN_RECENT_ITEM_ACTION, data: {} },
+      deps,
+    );
+    expect(opened).toEqual([]);
+    expect(removed).toEqual([]);
+  });
+
+  test("file:open-recent-item で fileExists:false なら removeRecentFile を呼び openMarkdownFile は呼ばない", async () => {
+    const opened: string[] = [];
+    const removed: string[] = [];
+    const deps = makeDeps({
+      openMarkdownFile: (p) => opened.push(p),
+      removeRecentFile: (p) => removed.push(p),
+      fileExists: () => false,
+    });
+    await dispatchMenuAction(
+      { action: FILE_OPEN_RECENT_ITEM_ACTION, data: { path: "/missing.md" } },
+      deps,
+    );
+    expect(opened).toEqual([]);
+    expect(removed).toEqual(["/missing.md"]);
+  });
+
+  test("file:clear-recent → deps.clearRecentFiles を呼ぶ", async () => {
+    let cleared = 0;
+    const deps = makeDeps({ clearRecentFiles: () => cleared++ });
+    await dispatchMenuAction({ action: FILE_CLEAR_RECENT_ACTION }, deps);
+    expect(cleared).toBe(1);
+  });
+
+  test("file:open-recent (親項目) は何もしない", async () => {
+    const opened: string[] = [];
+    const cleared: number[] = [];
+    const removed: string[] = [];
+    const deps = makeDeps({
+      openMarkdownFile: (p) => opened.push(p),
+      clearRecentFiles: () => cleared.push(1),
+      removeRecentFile: (p) => removed.push(p),
+    });
+    await dispatchMenuAction({ action: FILE_OPEN_RECENT_ACTION }, deps);
+    expect(opened).toEqual([]);
+    expect(cleared).toEqual([]);
+    expect(removed).toEqual([]);
   });
 });

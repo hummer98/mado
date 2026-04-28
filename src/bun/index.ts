@@ -12,7 +12,7 @@
  */
 
 import Electrobun, { ApplicationMenu, BrowserWindow, ContextMenu, Screen, Utils } from "electrobun/bun";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import type net from "node:net";
 import { parseCliArgs } from "../lib/cli";
@@ -53,6 +53,12 @@ import {
   type WindowBounds,
   type WindowStateSaver,
 } from "../lib/window-state";
+import {
+  addRecentFile,
+  clearRecentFiles,
+  loadRecentFiles,
+  removeRecentFile,
+} from "../lib/recent-files";
 
 /**
  * Markdown ファイルを読み込む。失敗時はフォールバックコンテンツを返す。
@@ -231,6 +237,15 @@ async function main(): Promise<void> {
   // ログ初期化
   initLogger();
   log("app_started", { version: "0.0.1" });
+
+  // Open Recent 履歴（プロセス全体で 1 つ）。起動時にロードして以降はメモリ上で同期する。
+  // 永続化は recent-files.ts 側で atomic write される。
+  // installApplicationMenu 前に呼ばれる経路（directory モード初期ループ）でも安全に
+  // 参照できるよう先行宣言する。menuCtrl 自体は遅れて代入されるため null ガードを入れる。
+  // 初期値 null の CFA narrowing で `if (menuCtrl)` が `never` 化するのを避けるため、
+  // 明示的なユニオン型へ widen する（plan §5 Step 3-4）。
+  let recentFiles: string[] = loadRecentFiles();
+  let menuCtrl = null as { rebuild: () => void } | null;
 
   // 1. CLI 引数パース → 起動モード決定
   const parseResult = parseCliArgs(process.argv);
@@ -462,6 +477,11 @@ async function main(): Promise<void> {
   // directory モードでは複数ファイルをループで追加するため、最後のファイルが
   // addFile() によってアクティブ化されてしまう。activePath (= 先頭ファイル) で
   // setActiveByPath を呼んでアクティブを戻す必要がある (plan.md §3 末尾の警告)。
+  //
+  // Open Recent 履歴 (T041): directory モード初期ループでは履歴に追加しない。
+  // 大量ファイル時に履歴が埋め尽くされるのを避け、 macOS Open Recent の慣例
+  // 「明示的に開いたファイルだけ並ぶ」に合わせる (plan §2.7)。
+  // file mode と directory mode の `activePath`（= 先頭ファイル）のみ 1 件追加する。
   if (!welcomeMode && initialFiles.length > 0 && gitRoot !== null) {
     for (const p of initialFiles) {
       state = addFile(state, buildEntry(p, gitRoot));
@@ -477,6 +497,11 @@ async function main(): Promise<void> {
         relativePath: e.relativePath,
         total,
       });
+    }
+    if (activePath !== null) {
+      recentFiles = addRecentFile(path.resolve(activePath));
+      // この時点で menuCtrl はまだ null。installApplicationMenu の初回 rebuild に吸収される。
+      if (menuCtrl) menuCtrl.rebuild();
     }
   }
 
@@ -722,6 +747,13 @@ async function main(): Promise<void> {
       }
 
       broadcastState();
+
+      // Open Recent 履歴を更新する。addFileToState は IPC / メニュー Open... /
+      // welcome→file 遷移など「ユーザーが明示的に開いた」経路で呼ばれるため、
+      // すべてのケースで履歴に積む（directory モード初期ループは別経路で除外。§2.7）。
+      recentFiles = addRecentFile(entry.absolutePath);
+      if (menuCtrl) menuCtrl.rebuild();
+
       console.log(
         `[mado] ファイルを追加しました: ${path.basename(newFilePath)}`,
       );
@@ -746,7 +778,7 @@ async function main(): Promise<void> {
   // close イベント時に Window メニューを更新するが、Electrobun 側の close 処理で
   // BrowserWindowMap から削除される前に rebuild() が走ると閉じたウィンドウが
   // 一覧に残る恐れがあるため、queueMicrotask で 1 拍遅延させて実行する。
-  const menuCtrl = installApplicationMenu(ApplicationMenu, {
+  menuCtrl = installApplicationMenu(ApplicationMenu, {
     openMarkdownFile: (absPath) => addFileToState(absPath),
     listWindows: (): WindowSummary[] => knownWindows.slice(),
     focusWindowById: (id) => {
@@ -761,6 +793,21 @@ async function main(): Promise<void> {
     zoomIn: () => win.webview.executeJavascript("window.__MADO_ZOOM_IN__()"),
     zoomOut: () => win.webview.executeJavascript("window.__MADO_ZOOM_OUT__()"),
     zoomReset: () => win.webview.executeJavascript("window.__MADO_ZOOM_RESET__()"),
+    // Open Recent (T041): 履歴はメインプロセス側の `recentFiles` で一元管理する。
+    // listRecentFiles はメニュー再構築時に毎回呼ばれるためコピーを返す（変更を漏らさない）。
+    listRecentFiles: () => recentFiles.slice(),
+    clearRecentFiles: () => {
+      clearRecentFiles();
+      recentFiles = [];
+      if (menuCtrl) menuCtrl.rebuild();
+      log("recent_files_cleared", {});
+    },
+    removeRecentFile: (p) => {
+      recentFiles = removeRecentFile(p);
+      if (menuCtrl) menuCtrl.rebuild();
+      log("recent_file_removed", { path: p, reason: "missing" });
+    },
+    fileExists: (p) => existsSync(p),
   });
 
   // 10b'. 左ペインファイルエントリ用コンテキストメニューをインストール

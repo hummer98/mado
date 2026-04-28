@@ -9,13 +9,19 @@
  */
 
 import type { ApplicationMenuItemConfig } from "electrobun/bun";
+import * as path from "node:path";
 import { log } from "../lib/logger";
 import { createT, detectLocale } from "../lib/locale";
 import type { Locale } from "../lib/locale";
 
 // --- アクション識別子 ---
 export const FILE_OPEN_ACTION = "file:open";
+/** Open Recent サブメニュー親項目（互換のため残置。dispatch では no-op） */
 export const FILE_OPEN_RECENT_ACTION = "file:open-recent";
+/** Open Recent 個別項目クリック。data: { path: string } */
+export const FILE_OPEN_RECENT_ITEM_ACTION = "file:open-recent-item";
+/** Open Recent > Clear Menu */
+export const FILE_CLEAR_RECENT_ACTION = "file:clear-recent";
 export const APP_PREFERENCES_ACTION = "app:preferences";
 export const WINDOW_FOCUS_ACTION = "window:focus";
 export const VIEW_ZOOM_IN_ACTION = "view:zoom-in";
@@ -83,6 +89,14 @@ export interface MenuDeps {
   zoomOut: () => void;
   /** View > 実寸 (⌘0) ハンドラ。WebView 側の __MADO_ZOOM_RESET__ を呼ぶ想定。 */
   zoomReset: () => void;
+  /** Open Recent submenu に展開する履歴一覧（新しい順、絶対パス） */
+  listRecentFiles: () => string[];
+  /** Clear Menu 押下時に履歴をクリアする */
+  clearRecentFiles: () => void;
+  /** missing file クリック時に該当エントリを履歴から除去する */
+  removeRecentFile: (absolutePath: string) => void;
+  /** ファイル存在判定（テストで上書き可能にするため deps 経由） */
+  fileExists: (absolutePath: string) => boolean;
 }
 
 /**
@@ -121,6 +135,11 @@ export function buildApplicationMenu(deps: MenuDeps, locale: Locale = detectLoca
     ],
   };
 
+  const recentSubmenu = buildRecentFilesSubmenu(deps, t);
+  const hasRecent = recentSubmenu.some(
+    (i) => (i as { action?: string }).action === FILE_OPEN_RECENT_ITEM_ACTION,
+  );
+
   const fileMenu: ApplicationMenuItemConfig = {
     label: t("file"),
     submenu: [
@@ -132,8 +151,8 @@ export function buildApplicationMenu(deps: MenuDeps, locale: Locale = detectLoca
       {
         label: t("openRecent"),
         action: FILE_OPEN_RECENT_ACTION,
-        enabled: false,
-        submenu: [],
+        enabled: hasRecent,
+        submenu: recentSubmenu,
       },
       { type: "divider" },
       { role: "close", accelerator: ACCELERATOR_CLOSE },
@@ -211,12 +230,58 @@ export function buildApplicationMenu(deps: MenuDeps, locale: Locale = detectLoca
 }
 
 /**
+ * Open Recent サブメニューを動的に組み立てる。
+ *
+ * - `listRecentFiles()` の結果を `fileExists()` でフィルタしながら展開
+ * - 履歴が 0 件の場合: `[Clear Menu (disabled)]` のみ
+ * - 履歴が 1 件以上: `[items..., divider, Clear Menu (enabled)]`
+ *
+ * 履歴本体（=ファイル）の更新はここでは行わない。表示時に存在しないファイルを
+ * フィルタするだけ。実体の除去は `dispatchMenuAction` のクリック経路で行う。
+ */
+function buildRecentFilesSubmenu(
+  deps: MenuDeps,
+  t: (key: import("../lib/locale").MenuLabelKey) => string,
+): ApplicationMenuItemConfig[] {
+  const existing = deps.listRecentFiles().filter((p) => deps.fileExists(p));
+  if (existing.length === 0) {
+    return [
+      {
+        label: t("clearRecent"),
+        action: FILE_CLEAR_RECENT_ACTION,
+        enabled: false,
+      },
+    ];
+  }
+  const items: ApplicationMenuItemConfig[] = existing.map((p) => ({
+    label: path.basename(p),
+    action: FILE_OPEN_RECENT_ITEM_ACTION,
+    data: { path: p },
+  }));
+  items.push({ type: "divider" });
+  items.push({
+    label: t("clearRecent"),
+    action: FILE_CLEAR_RECENT_ACTION,
+  });
+  return items;
+}
+
+/**
  * `data` が `{ winId: number }` を持つか判定する型ガード。
  */
 function hasWinId(data: unknown): data is { winId: number } {
   if (typeof data !== "object" || data === null) return false;
   const value = (data as { winId?: unknown }).winId;
   return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * `data` が `{ path: string }` を持つか判定する型ガード（空文字は不正）。
+ */
+function hasPath(data: unknown): data is { path: string } {
+  if (typeof data !== "object" || data === null) return false;
+  const value = (data as { path?: unknown }).path;
+  return typeof value === "string" && value !== "";
 }
 
 /**
@@ -286,7 +351,28 @@ export async function dispatchMenuAction(
     return;
   }
 
-  // 未知のアクションは無視（role 系は native 側が処理するためここには来ない）
+  if (event.action === FILE_OPEN_RECENT_ITEM_ACTION) {
+    if (!hasPath(event.data)) {
+      log("error", { message: "file:open-recent-item: invalid data" });
+      return;
+    }
+    const target = event.data.path;
+    if (!deps.fileExists(target)) {
+      log("recent_file_missing", { path: target });
+      deps.removeRecentFile(target);
+      return;
+    }
+    deps.openMarkdownFile(target);
+    return;
+  }
+
+  if (event.action === FILE_CLEAR_RECENT_ACTION) {
+    deps.clearRecentFiles();
+    return;
+  }
+
+  // FILE_OPEN_RECENT_ACTION（親項目）と未知 action は no-op。
+  // 親項目は通常 OS が submenu を開くだけで JS 側へは届かないが、保険として無視する。
 }
 
 /**
