@@ -1,17 +1,24 @@
 name: Update Homebrew Cask on Release
 
-# Release published イベントで起動し、hummer98/homebrew-mado の
+# build-release.yml (Build & Release (codesign + notarize)) の完了を
+# workflow_run トリガーで検知して起動し、hummer98/homebrew-mado の
 # Casks/mado.rb を自動更新する。Casks/mado.rb の現物は mado 本体には
 # 存在せず、workflow 実行時に actions/checkout で tap リポジトリを
 # clone してから sed で書き換える。詳細は docs/release-automation.md を参照。
+#
+# トリガー方式の経緯: 旧方式 (release: published) は build-release.yml の
+# release 作成と asset upload の間にレースが発生し、update-tap が先に走って
+# zip asset を見つけられず失敗する事故が起きた (T040、v0.3.0 run 25007975375)。
+# workflow_run であれば build-release の完了を確実に待ってから発火する。
 #
 # 認証: PAT ではなく GitHub App (hummer98-tap-updater) を使用する。
 # APP_ID / APP_PRIVATE_KEY を secrets に登録し、
 # actions/create-github-app-token でインストールトークンを取得して checkout する。
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Build & Release (codesign + notarize)"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -27,21 +34,29 @@ concurrency:
 
 jobs:
   update-cask:
-    # prerelease / draft は自動更新対象外。workflow_dispatch は常に許可。
+    # workflow_dispatch は常に許可（手動再実行・過去 tag の補正用）。
+    # workflow_run は build-release.yml が push tag で起動して成功した場合のみ許可:
+    #   - conclusion == 'success': 失敗・キャンセル・skipped を除外
+    #   - event == 'push': workflow_dispatch 由来の dry-run (release を作らない) を除外
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event.release.prerelease == false && github.event.release.draft == false)
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: macos-latest
     steps:
       - name: Resolve release tag
         id: tag
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          # workflow_run.head_branch は tag push のとき tag 名 (例: "v0.3.0") が入る。
+          # tag push 以外 (push to branch) では branch 名が入るが、
+          # build-release.yml は `on: push: tags: ['v*.*.*']` でしか push 起動しないので、
+          # if: ガードで event == 'push' を通った時点で tag 名と確定できる。
+          WORKFLOW_RUN_TAG: ${{ github.event.workflow_run.head_branch }}
           INPUT_TAG: ${{ inputs.tag }}
         run: |
-          TAG="${RELEASE_TAG:-$INPUT_TAG}"
+          TAG="${WORKFLOW_RUN_TAG:-$INPUT_TAG}"
           if [ -z "$TAG" ]; then
-            echo "::error::No tag resolved (release.tag_name / inputs.tag both empty)"
+            echo "::error::No tag resolved (workflow_run.head_branch / inputs.tag both empty)"
             exit 1
           fi
           VERSION="${TAG#v}"
