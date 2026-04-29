@@ -10,10 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - prevent stale highlight residue in in-page search (T045)
-- build-release が update-tap を起動するよう GitHub App トークン化
 
 ### Changed
-- ci(update-tap): switch trigger from release:published to workflow_run
+- ci(update-tap): switch trigger from release:published to workflow_run, ensuring Homebrew Cask auto-update fires reliably after CI completes
 
 
 ## [0.4.0] - 2026-04-29
