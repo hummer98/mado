@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-04-29
+
+### Fixed
+- prevent stale highlight residue in in-page search (T045)
+- build-release が update-tap を起動するよう GitHub App トークン化
+
+### Changed
+- ci(update-tap): switch trigger from release:published to workflow_run
+
+
 ## [0.4.0] - 2026-04-29
 
 ### Added
