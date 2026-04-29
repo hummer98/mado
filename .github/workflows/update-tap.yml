@@ -1,6 +1,6 @@
 name: Update Homebrew Cask on Release
 
-# build-release.yml (Build & Release (codesign + notarize)) の完了を
+# build-release.yml (Build and Release) の完了を
 # workflow_run トリガーで検知して起動し、hummer98/homebrew-mado の
 # Casks/mado.rb を自動更新する。Casks/mado.rb の現物は mado 本体には
 # 存在せず、workflow 実行時に actions/checkout で tap リポジトリを
@@ -17,7 +17,7 @@ name: Update Homebrew Cask on Release
 
 on:
   workflow_run:
-    workflows: ["Build & Release (codesign + notarize)"]
+    workflows: ["Build and Release"]
     types: [completed]
   workflow_dispatch:
     inputs:

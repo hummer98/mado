@@ -1,4 +1,4 @@
-name: Build & Release (codesign + notarize)
+name: Build and Release
 
 # tag push (v*.*.*) で macos-14 runner 上で署名・公証ビルドを実行し、
 # zip / dmg を GitHub Release に自動添付する。
