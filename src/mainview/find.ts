@@ -17,10 +17,13 @@
  * - any 禁止。`unknown` で受けて型ガードで絞る
  */
 
-// TS lib.dom.d.ts に Highlight 型が無い環境への保険。標準と互換のシグネチャ。
+// TS lib.dom.d.ts に Highlight 型が無い環境への保険。標準 (Highlight extends Set<AbstractRange>) と互換のシグネチャ。
 declare class Highlight {
   constructor(...ranges: Range[]);
-  add(range: Range): void;
+  add(range: Range): Highlight;
+  clear(): void;
+  delete(range: Range): boolean;
+  readonly size: number;
 }
 
 // 現行の TS lib.dom.d.ts は HighlightRegistry に forEach しか定義していないため、
@@ -62,6 +65,13 @@ const state: FindState = {
 };
 
 let debounceTimer: number | null = null;
+
+// T045: ハイライト残留対策で同一 Highlight インスタンスを使い回す。
+// `CSS.highlights.delete(name)` → `set(name, new Highlight(...))` の rapid pattern を取ると
+// WebKit の描画キャッシュが前世代の Range を保持して残留ハイライトとなる挙動が観測されたため、
+// 「同じインスタンスを registry に登録したまま `clear()` + `add()` で内容のみ更新する」方針に切り替え。
+let allHighlight: Highlight | null = null;
+let currentHighlight: Highlight | null = null;
 
 const FIND_LABELS = {
   en: {
@@ -180,27 +190,43 @@ function applyHighlights(): void {
     console.warn("[mado] CSS Custom Highlight API unavailable");
     return;
   }
-  CSS.highlights.delete(HIGHLIGHT_ALL);
-  CSS.highlights.delete(HIGHLIGHT_CURRENT);
-  if (state.ranges.length === 0) return;
 
-  // MAX_MATCHES=5000 のスプレッド展開は V8/JSC のスタック上限 (~65535) 内で安全。
-  const allHi = new Highlight(...state.ranges);
-  CSS.highlights.set(HIGHLIGHT_ALL, allHi);
+  // 全マッチ用 Highlight: singleton を再利用して clear()+add() で内容更新 (T045)
+  if (allHighlight === null) {
+    allHighlight = new Highlight();
+  } else {
+    allHighlight.clear();
+  }
+  // 防御的: 外部から CSS.highlights が削除された場合に備えて毎回 has を確認して再登録
+  if (!CSS.highlights.has(HIGHLIGHT_ALL)) {
+    CSS.highlights.set(HIGHLIGHT_ALL, allHighlight);
+  }
+  for (const r of state.ranges) {
+    allHighlight.add(r);
+  }
 
+  // 現在マッチ用 Highlight: 同様に singleton 再利用 (T045)
+  if (currentHighlight === null) {
+    currentHighlight = new Highlight();
+  } else {
+    currentHighlight.clear();
+  }
+  if (!CSS.highlights.has(HIGHLIGHT_CURRENT)) {
+    CSS.highlights.set(HIGHLIGHT_CURRENT, currentHighlight);
+  }
   if (state.currentIndex >= 0 && state.currentIndex < state.ranges.length) {
     const cur = state.ranges[state.currentIndex];
-    if (cur) {
-      const curHi = new Highlight(cur);
-      CSS.highlights.set(HIGHLIGHT_CURRENT, curHi);
-    }
+    if (cur) currentHighlight.add(cur);
   }
 }
 
 function clearHighlights(): void {
   if (!hasHighlightRegistry()) return;
-  CSS.highlights.delete(HIGHLIGHT_ALL);
-  CSS.highlights.delete(HIGHLIGHT_CURRENT);
+  // T045: registry から消すと同じ name の delete/set rapid pattern を再現してしまうため、
+  // 既に保持している singleton を空にするだけにする。registry に空 Highlight が残っても
+  // 描画上は 0 件で何も表示されない（Highlight extends Set の size=0 状態）。
+  if (allHighlight !== null) allHighlight.clear();
+  if (currentHighlight !== null) currentHighlight.clear();
 }
 
 function ensureAncestorsVisible(target: Element): void {
@@ -377,6 +403,22 @@ declare global {
     __MADO_SET_LOCALE__: (locale: FindLocale) => void;
   }
 }
+
+/**
+ * テスト専用 export (T045)。bun:test + happy-dom から DOM 連携部分の振る舞いを
+ * 性質テストで検証するための名前空間。production コードからは参照しない。
+ */
+export const __test__ = {
+  state,
+  updateSearch,
+  closeFind,
+  resetFind,
+  applyHighlights,
+  navigate,
+  HIGHLIGHT_ALL,
+  HIGHLIGHT_CURRENT,
+  MAX_MATCHES,
+} as const;
 
 /**
  * 検索機能を初期化する。index.ts から DOMContentLoaded 後の同期パスで 1 回だけ呼ぶ。
