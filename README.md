@@ -59,6 +59,28 @@ For source builds, see [Development](#development) below.
 
 Download `mado-v*-macos-arm64.zip` from the [Releases](https://github.com/hummer98/mado/releases) page, unzip `mado.app` into `/Applications`, and add a shell wrapper to your `PATH` that exports `MADO_FILE` before `exec`ing `/Applications/mado.app/Contents/MacOS/launcher`. See [`bin/mado`](./bin/mado) for reference.
 
+### Setting mado as the default `.md` viewer
+
+mado declares itself as a Markdown handler in its `Info.plist`, so once it's
+installed in `/Applications` you can wire it up via Finder without `duti`:
+
+1. In Finder, right-click any `.md` file → **Get Info**.
+2. Expand **Open with** and pick `mado` from the dropdown (it appears under
+   "Other applications" since mado registers as `LSHandlerRank=Alternate`).
+3. Click **Change All…**, then confirm the prompt that asks whether to apply
+   the change to all similar documents.
+
+If `mado` doesn't appear in the dropdown right after install, refresh
+LaunchServices once:
+
+```bash
+/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f /Applications/mado.app
+```
+
+mado registers itself as `Alternate` rather than `Default` so it doesn't
+silently steal `.md` away from your existing editor (Typora, Obsidian, VS Code,
+…). You opt in explicitly via "Change All…" above.
+
 ## Usage
 
 ```bash

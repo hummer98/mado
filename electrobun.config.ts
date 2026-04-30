@@ -9,6 +9,14 @@ export default {
   runtime: {
     exitOnLastWindowClosed: true,
   },
+  scripts: {
+    // Info.plist に CFBundleDocumentTypes を注入する hook (T046)。
+    // dev ビルド (inner bundle) と stable ビルド (outer wrapper) の双方を
+    // カバーするため postBuild と postWrap の両方に登録する。詳細は
+    // scripts/inject-document-types.ts 冒頭コメント参照。
+    postBuild: "scripts/inject-document-types.ts",
+    postWrap: "scripts/inject-document-types.ts",
+  },
   build: {
     bun: {
       entrypoint: "src/bun/index.ts",

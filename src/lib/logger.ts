@@ -10,6 +10,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { formatTimestamp } from "./format-timestamp.ts";
 
 /** 現在のログファイルパス（initLogger 後に設定） */
 let currentLogPath: string | null = null;
@@ -25,29 +26,6 @@ function getLogDir(): string {
 
   const tmpDir = process.env["TMPDIR"] ?? os.tmpdir();
   return path.join(tmpDir, "mado");
-}
-
-/**
- * ローカルタイムゾーン付き ISO 8601 タイムスタンプを生成する
- * 例: 2026-04-12T10:30:00+09:00
- */
-function formatTimestamp(date: Date): string {
-  const pad = (n: number, len = 2): string => String(n).padStart(len, "0");
-
-  const year = date.getFullYear();
-  const month = pad(date.getMonth() + 1);
-  const day = pad(date.getDate());
-  const hour = pad(date.getHours());
-  const min = pad(date.getMinutes());
-  const sec = pad(date.getSeconds());
-
-  // TZ オフセット計算
-  const tzOffset = -date.getTimezoneOffset();
-  const tzSign = tzOffset >= 0 ? "+" : "-";
-  const tzHour = pad(Math.floor(Math.abs(tzOffset) / 60));
-  const tzMin = pad(Math.abs(tzOffset) % 60);
-
-  return `${year}-${month}-${day}T${hour}:${min}:${sec}${tzSign}${tzHour}:${tzMin}`;
 }
 
 /**
