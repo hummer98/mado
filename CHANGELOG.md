@@ -6,8 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-01
+
 ### Added
 - add `CFBundleDocumentTypes` / `LSItemContentTypes` so Finder lists mado as a Markdown handler (T046)
+
+### Fixed
+- rename build-release workflow to make workflow_run filter match
 
 ## [0.4.1] - 2026-04-29
 
