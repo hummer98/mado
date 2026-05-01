@@ -4,7 +4,7 @@ export default {
   app: {
     name: "mado",
     identifier: "com.ridgeroot.mado",
-    version: "0.4.1",
+    version: "0.4.2",
   },
   runtime: {
     exitOnLastWindowClosed: true,
