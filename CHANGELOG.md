@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- focus existing window when a file is delegated via IPC
+
 ## [0.4.2] - 2026-05-01
 
 ### Added

@@ -662,6 +662,11 @@ async function main(): Promise<void> {
     });
     ipcServer = startIpcServer(ipcSocketPath, (newFilePath) => {
       addFileToState(newFilePath);
+      try {
+        win.focus();
+      } catch (err) {
+        log("window_focus_failed", { reason: String(err) });
+      }
     });
     welcomeMode = false;
     log("welcome_to_file_transition", { path: firstAbsPath, gitRoot });
@@ -790,6 +795,11 @@ async function main(): Promise<void> {
   if (!welcomeMode && ipcSocketPath !== null) {
     ipcServer = startIpcServer(ipcSocketPath, (newFilePath) => {
       addFileToState(newFilePath);
+      try {
+        win.focus();
+      } catch (err) {
+        log("window_focus_failed", { reason: String(err) });
+      }
     });
   }
 
