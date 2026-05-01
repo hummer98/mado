@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/banner.svg" alt="mado" width="100%" />
+  <img src="./assets/icon.svg" alt="mado" width="180" />
 </p>
 
 <p align="center">
