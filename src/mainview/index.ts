@@ -10,6 +10,7 @@ import { gfmHeadingId } from "marked-gfm-heading-id";
 import hljs from "highlight.js";
 import mermaid from "mermaid";
 import { rewriteImageUrls } from "./rewrite-image-urls";
+import { rewriteLinks } from "./rewrite-links";
 import { clampZoom, nextZoomIn, nextZoomOut, ZOOM_DEFAULT } from "../lib/zoom-state";
 import { initFind } from "./find";
 
@@ -142,6 +143,17 @@ async function render(markdownText: string, filePath: string): Promise<void> {
 
   if (wsPort !== null && filePath) {
     rewriteImageUrls(contentEl, filePath, wsPort);
+  }
+
+  if (filePath) {
+    rewriteLinks(contentEl, filePath, {
+      openFile: (absolutePath) => {
+        sendClientMessage({ type: "open-file", absolutePath });
+      },
+      openExternal: (url) => {
+        sendToHost({ type: "open-external", url });
+      },
+    });
   }
 
   const mermaidNodes = contentEl.querySelectorAll<HTMLElement>(".mermaid");
@@ -318,7 +330,8 @@ function updateEmptyState(isEmpty: boolean): void {
 type ClientMessage =
   | { type: "ready" }
   | { type: "switch-file"; absolutePath: string }
-  | { type: "remove-file"; absolutePath: string };
+  | { type: "remove-file"; absolutePath: string }
+  | { type: "open-file"; absolutePath: string };
 
 function sendClientMessage(msg: ClientMessage): void {
   if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {

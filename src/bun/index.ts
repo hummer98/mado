@@ -190,6 +190,56 @@ function handleEntryContextMenuRequest(event: unknown): void {
 }
 
 /**
+ * host-message イベントから「外部 URL を既定アプリで開く」要求を処理する。
+ * ペイロード形状: `{ type: "open-external", url: string }`
+ *
+ * セキュリティ:
+ *   - http(s): / mailto: のみ許可（schema allowlist）
+ *   - これ以外（file: / javascript: / 任意 shell スキーム等）は拒否してログに記録
+ *   - macOS の `open` コマンドにシェル経由ではなく Bun.spawn で渡し、引数注入を防ぐ
+ */
+function handleOpenExternalRequest(event: unknown): void {
+  try {
+    if (
+      typeof event !== "object" ||
+      event === null ||
+      !("data" in event) ||
+      typeof (event as Record<string, unknown>).data !== "object"
+    ) {
+      return;
+    }
+
+    const data = (event as Record<string, unknown>).data as Record<string, unknown>;
+    if (data.type !== "open-external") return;
+
+    const url = data.url;
+    if (typeof url !== "string" || url === "") {
+      log("error", { message: "open-external: invalid payload" });
+      return;
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      log("open_external_rejected", { reason: "invalid_url", url });
+      return;
+    }
+
+    const allowedSchemes = new Set(["http:", "https:", "mailto:"]);
+    if (!allowedSchemes.has(parsed.protocol)) {
+      log("open_external_rejected", { reason: "scheme_not_allowed", scheme: parsed.protocol });
+      return;
+    }
+
+    log("open_external", { url });
+    Bun.spawn(["open", url], { stdout: "ignore", stderr: "ignore" });
+  } catch (err) {
+    log("error", { message: `open external request failed: ${String(err)}` });
+  }
+}
+
+/**
  * host-message イベントから Mermaid エラー情報を処理する。
  * WebView 側の __electrobunSendToHost() から送信されたデータを受信する。
  */
@@ -561,6 +611,16 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (msg.type === "open-file") {
+      const target = path.resolve(msg.absolutePath);
+      if (!existsSync(target)) {
+        log("error", { message: "open-file: not found", path: target });
+        return;
+      }
+      addFileToState(target);
+      return;
+    }
+
     if (msg.type === "remove-file") {
       const target = path.resolve(msg.absolutePath);
       const exists = state.files.some(
@@ -728,6 +788,7 @@ async function main(): Promise<void> {
     logHostMessageRaw(event);
     handleMermaidErrorEvent(event);
     handleEntryContextMenuRequest(event);
+    handleOpenExternalRequest(event);
   });
 
   /**

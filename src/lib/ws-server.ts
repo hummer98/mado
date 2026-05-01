@@ -33,6 +33,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ready") }),
   z.object({ type: z.literal("switch-file"), absolutePath: z.string().min(1) }),
   z.object({ type: z.literal("remove-file"), absolutePath: z.string().min(1) }),
+  z.object({ type: z.literal("open-file"), absolutePath: z.string().min(1) }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 

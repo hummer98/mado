@@ -27,6 +27,22 @@ describe("ClientMessageSchema", () => {
     expect(r.success).toBe(true);
   });
 
+  test("open-file メッセージを parse できる", () => {
+    const r = ClientMessageSchema.safeParse({
+      type: "open-file",
+      absolutePath: "/a/b.md",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  test("open-file の absolutePath が空文字列のとき reject される", () => {
+    const r = ClientMessageSchema.safeParse({
+      type: "open-file",
+      absolutePath: "",
+    });
+    expect(r.success).toBe(false);
+  });
+
   test("absolutePath が空文字列のとき reject される", () => {
     const r = ClientMessageSchema.safeParse({
       type: "switch-file",
