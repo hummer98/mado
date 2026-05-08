@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- refactor window lifecycle to support reopening after all windows closed (T049)
+
 ### Fixed
 - focus existing window when a file is delegated via IPC
 

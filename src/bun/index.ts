@@ -6,15 +6,18 @@
  * 初回起動なら BrowserWindow を作成し、IPC サーバー + WS サーバーを起動する。
  *
  * 引数も env.MADO_FILE も無い場合 (Finder/Launchpad 起動) は welcome モードで起動し、
- * ⌘O 等で最初のファイルが追加された時点で file mode に昇格する (`upgradeToFileMode`)。
+ * ⌘O 等で最初のファイルが追加された時点で file mode に昇格する。
  *
  * ファイルリストの状態は本プロセスで一元管理し、WebView 側は state メッセージを受け取って描画するだけ。
+ *
+ * T049 以降は BrowserWindow の寿命を `WindowManager` (`src/lib/window-manager.ts`) に
+ * 委ねており、本ファイルは「ウィンドウ寿命」と「プロセス寿命」を分離した上で
+ * 後者と紐づくリソース (state / wsServer / ipcServer / recentFiles / preferences) のみを持つ。
  */
 
 import Electrobun, { ApplicationMenu, BrowserWindow, ContextMenu, Screen, Utils } from "electrobun/bun";
 import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
-import type net from "node:net";
 import { parseCliArgs } from "../lib/cli";
 import { listMarkdownFiles } from "../lib/markdown-discovery";
 import { findGitRoot } from "../lib/git-root";
@@ -39,9 +42,7 @@ import {
 import type { FileListEntry, FileListState } from "../lib/file-list";
 import { buildWindowTitle } from "../lib/window-title";
 import { decideStartupMode } from "./startup";
-import { computeUpgradeToFileMode } from "../lib/upgrade-mode";
 import { installApplicationMenu } from "./menu";
-import type { WindowSummary } from "./menu";
 import { detectLocale } from "../lib/locale";
 import { buildEntryContextMenu, installEntryContextMenu } from "./context-menu";
 import {
@@ -62,6 +63,7 @@ import {
 } from "../lib/recent-files";
 import { loadPreferences, savePreferences } from "../lib/preferences";
 import type { Preferences } from "../lib/preferences";
+import { WindowManager } from "../lib/window-manager";
 
 /**
  * Markdown ファイルを読み込む。失敗時はフォールバックコンテンツを返す。
@@ -76,17 +78,6 @@ function loadMarkdownFile(filePath: string): string {
     console.error(`[mado] ファイルを開けませんでした: ${filePath}`);
     return `# mado\n\nファイルを開けませんでした: \`${filePath}\`\n`;
   }
-}
-
-/**
- * Electrobun の close イベントから id を抽出する。未知形式なら null。
- */
-function extractClosedWindowId(event: unknown): number | null {
-  if (typeof event !== "object" || event === null) return null;
-  const data = (event as { data?: unknown }).data;
-  if (typeof data !== "object" || data === null) return null;
-  const id = (data as { id?: unknown }).id;
-  return typeof id === "number" && Number.isFinite(id) ? id : null;
 }
 
 /**
@@ -296,7 +287,7 @@ async function main(): Promise<void> {
   // installApplicationMenu 前に呼ばれる経路（directory モード初期ループ）でも安全に
   // 参照できるよう先行宣言する。menuCtrl 自体は遅れて代入されるため null ガードを入れる。
   // 初期値 null の CFA narrowing で `if (menuCtrl)` が `never` 化するのを避けるため、
-  // 明示的なユニオン型へ widen する（plan §5 Step 3-4）。
+  // 明示的なユニオン型へ widen する。
   let recentFiles: string[] = loadRecentFiles();
   let menuCtrl = null as { rebuild: () => void } | null;
 
@@ -324,13 +315,13 @@ async function main(): Promise<void> {
   }
 
   // welcome / file / directory で初期化の仕方を切り替える。
-  // 共通: gitRoot / detectedGitRoot / ipcServer / socketPath は mutable 化し、
-  // welcome → file 遷移時に upgradeToFileMode() で確定する。
-  let welcomeMode = startup.kind === "welcome";
-  let detectedGitRoot: string | null = null;
-  let gitRoot: string | null = null;
-  let ipcServer: net.Server | null = null;
-  let ipcSocketPath: string | null = null;
+  // 確定した値は後段で WindowManager の初期状態として渡す。
+  // file/directory: gitRoot / detectedGitRoot / ipcSocketPath をここで算出
+  // welcome:        全て null。WindowManager が welcome → file 遷移時に確定する
+  let initialWelcomeMode = startup.kind === "welcome";
+  let initialDetectedGitRoot: string | null = null;
+  let initialGitRoot: string | null = null;
+  let initialIpcSocketPath: string | null = null;
 
   // 起動時に state に登録するファイル列 (file は単一、welcome は空、directory は列挙結果)。
   let initialFiles: string[] = [];
@@ -345,23 +336,21 @@ async function main(): Promise<void> {
     }
 
     // 2. git root 検出
-    //    detectedGitRoot: 実際に検出できたか（null 可）を保持。ウィンドウタイトル生成に使う。
-    //    gitRoot:         ソケットパス算出・相対パス計算用に fallback を含んだ値。
-    detectedGitRoot = findGitRoot(startup.filePath);
-    gitRoot = detectedGitRoot ?? path.dirname(startup.filePath);
+    initialDetectedGitRoot = findGitRoot(startup.filePath);
+    initialGitRoot = initialDetectedGitRoot ?? path.dirname(startup.filePath);
     log("git_root_detected", {
-      gitRoot,
+      gitRoot: initialGitRoot,
       filePath: startup.filePath,
-      detected: detectedGitRoot !== null,
+      detected: initialDetectedGitRoot !== null,
     });
 
     // 3. ソケットパス算出
-    ipcSocketPath = getSocketPath(gitRoot);
+    initialIpcSocketPath = getSocketPath(initialGitRoot);
 
     // 4. 既存プロセスへの委譲を試みる
-    const delegated = await sendFileToExistingProcess(ipcSocketPath, startup.filePath);
+    const delegated = await sendFileToExistingProcess(initialIpcSocketPath, startup.filePath);
     if (delegated) {
-      log("file_delegated", { path: startup.filePath, gitRoot });
+      log("file_delegated", { path: startup.filePath, gitRoot: initialGitRoot });
       console.log(
         `[mado] 既存ウィンドウにファイルを送信しました: ${path.basename(startup.filePath)}`,
       );
@@ -408,24 +397,24 @@ async function main(): Promise<void> {
     }
 
     // git root 検出は先頭ファイルを起点にする (file モードと同じヘルパを流用)。
-    detectedGitRoot = findGitRoot(discovery.files[0]);
-    gitRoot = detectedGitRoot ?? startup.dirPath;
+    initialDetectedGitRoot = findGitRoot(discovery.files[0]);
+    initialGitRoot = initialDetectedGitRoot ?? startup.dirPath;
     log("git_root_detected", {
-      gitRoot,
+      gitRoot: initialGitRoot,
       filePath: discovery.files[0],
-      detected: detectedGitRoot !== null,
+      detected: initialDetectedGitRoot !== null,
     });
 
     // ソケットパス算出
-    ipcSocketPath = getSocketPath(gitRoot);
+    initialIpcSocketPath = getSocketPath(initialGitRoot);
 
-    // 既存プロセス委譲は先頭ファイルのみ送る (plan.md §要確認事項 #2)。
+    // 既存プロセス委譲は先頭ファイルのみ送る。
     const delegated = await sendFileToExistingProcess(
-      ipcSocketPath,
+      initialIpcSocketPath,
       discovery.files[0],
     );
     if (delegated) {
-      log("file_delegated", { path: discovery.files[0], gitRoot });
+      log("file_delegated", { path: discovery.files[0], gitRoot: initialGitRoot });
       console.log(
         `[mado] 既存ウィンドウにファイルを送信しました: ${path.basename(discovery.files[0])}`,
       );
@@ -447,7 +436,7 @@ async function main(): Promise<void> {
    * 絶対パスから FileListEntry を構築する。
    *
    * welcome→file 遷移の冪等性のため、gitRoot はクロージャではなく引数で受け取る
-   * (addFileToState 内で upgradeToFileMode を先に呼び、決定済みの gitRoot を渡す)。
+   * (addFileToState 内で getOrCreateWindowForFile を先に呼び、決定済みの gitRoot を渡す)。
    */
   function buildEntry(absPath: string, rootForRelative: string): FileListEntry {
     const abs = path.resolve(absPath);
@@ -533,15 +522,15 @@ async function main(): Promise<void> {
   // 5a. file / directory mode で初期ファイルを state に追加する。
   // directory モードでは複数ファイルをループで追加するため、最後のファイルが
   // addFile() によってアクティブ化されてしまう。activePath (= 先頭ファイル) で
-  // setActiveByPath を呼んでアクティブを戻す必要がある (plan.md §3 末尾の警告)。
+  // setActiveByPath を呼んでアクティブを戻す必要がある。
   //
   // Open Recent 履歴 (T041): directory モード初期ループでは履歴に追加しない。
   // 大量ファイル時に履歴が埋め尽くされるのを避け、 macOS Open Recent の慣例
-  // 「明示的に開いたファイルだけ並ぶ」に合わせる (plan §2.7)。
+  // 「明示的に開いたファイルだけ並ぶ」に合わせる。
   // file mode と directory mode の `activePath`（= 先頭ファイル）のみ 1 件追加する。
-  if (!welcomeMode && initialFiles.length > 0 && gitRoot !== null) {
+  if (!initialWelcomeMode && initialFiles.length > 0 && initialGitRoot !== null) {
     for (const p of initialFiles) {
-      state = addFile(state, buildEntry(p, gitRoot));
+      state = addFile(state, buildEntry(p, initialGitRoot));
     }
     if (activePath !== null) {
       state = setActiveByPath(state, path.resolve(activePath));
@@ -562,9 +551,108 @@ async function main(): Promise<void> {
     }
   }
 
-  // 6. WebSocket サーバー起動（クライアントメッセージで state 更新）
+  // 6. WindowManager の生成。BrowserWindow の寿命と welcome / file モードを集約する (T049)。
+  //
+  // - state / wsServer / watcher / recentFiles / preferences は引き続き本ファイルが管理する
+  // - WindowManager 内部で IPC server の起動を行うため、`onIpcServerNeeded` で startIpcServer を注入
+  // - close 時の watcher 停止 / saver flush / menu rebuild は `onWindowClosed` で受ける
+  const windowManager = new WindowManager(
+    {
+      findGitRoot,
+      loadWindowStateStore,
+      resolveStateKey,
+      getBoundsForKey,
+      clampBounds: clampWithDefaultDisplays,
+      buildTitle: buildWindowTitle,
+      getActivePath: () => activeEntry(state)?.absolutePath ?? null,
+      onWindowCreated: (browserWindow, _isWelcome) => {
+        // 8. DOM 準備完了後の処理（WebSocket 接続を促す。state は client の "ready" で配信）
+        browserWindow.webview.on("dom-ready", () => {
+          log("webview_state_changed", { state: "dom-ready" });
+
+          // WebSocket クライアントを起動（ポートを渡す）
+          if (wsServer) {
+            browserWindow.webview.executeJavascript(
+              `window.__MADO_WS_CONNECT__(${wsServer.port})`,
+            );
+          }
+
+          // T042: 起動時の Wide Layout 状態を WebView に反映する。
+          // executeJavascript は逐次実行されるため、最初の state メッセージで render() が
+          // 走る前に maxWidth が設定され、レイアウトのちらつきが起きない。
+          browserWindow.webview.executeJavascript(
+            `window.__MADO_SET_WIDE_LAYOUT__(${preferences.wideLayout})`,
+          );
+
+          // T043: 検索ボックスの aria-label / title を locale に合わせて切り替える。
+          browserWindow.webview.executeJavascript(
+            `window.__MADO_SET_LOCALE__(${JSON.stringify(detectLocale())})`,
+          );
+
+          // watcher を起動（既に動いていなければ）
+          if (!watcher) {
+            syncWatcherToActive();
+          }
+        });
+
+        browserWindow.webview.on("did-navigate", () => {
+          log("webview_state_changed", { state: "did-navigate" });
+          // ページ再読み込み時は client が再度 ready を送って state が再配信される
+        });
+
+        // 9. host-message の受信
+        //
+        // 生値ログ → Mermaid エラー → エントリ右クリックメニュー要求 の順で呼ぶ。
+        // 各ハンドラは自分の type 以外は早期 return するため共存可能。
+        browserWindow.on("host-message", (event: unknown) => {
+          logHostMessageRaw(event);
+          handleMermaidErrorEvent(event);
+          handleEntryContextMenuRequest(event);
+          handleOpenExternalRequest(event);
+        });
+
+        // 10c. ウィンドウ状態の永続化 (T022)
+        // resize / move ハンドラは「ウィンドウ単位」のため、ここで取り付ける。
+        browserWindow.on("resize", (event: unknown) => {
+          handleBoundsChanged(extractBounds(event));
+        });
+        browserWindow.on("move", (event: unknown) => {
+          handleBoundsChanged(extractBounds(event));
+        });
+
+        // 初期ウィンドウ生成直後にも再構築（タイトル反映等のため）。
+        // R4: queueMicrotask で 1 拍遅延させるのは Electrobun 側の close リスナーで
+        // BrowserWindowMap から削除された後に rebuild() を走らせる順序保証のため。
+        queueMicrotask(() => menuCtrl?.rebuild());
+      },
+      onWindowClosed: (_id) => {
+        // 保留中の bounds を同期 flush
+        if (saver) saver.flush();
+        // watcher はウィンドウに紐付くので停止する。state / recentFiles / preferences は維持。
+        if (watcher) {
+          watcher.stop();
+          watcher = null;
+        }
+        // R4: BrowserWindowMap からの削除タイミングと整合させるため queueMicrotask 越しに rebuild。
+        queueMicrotask(() => menuCtrl?.rebuild());
+      },
+      onIpcServerNeeded: (socketPath) =>
+        startIpcServer(socketPath, (newFilePath) => {
+          addFileToState(newFilePath);
+        }),
+      stopIpcServer,
+    },
+    {
+      welcomeMode: initialWelcomeMode,
+      detectedGitRoot: initialDetectedGitRoot,
+      gitRoot: initialGitRoot,
+      ipcSocketPath: initialIpcSocketPath,
+    },
+  );
+
+  // 7. WebSocket サーバー起動（クライアントメッセージで state 更新）
   wsServer = startWsServer({
-    allowedRoot: () => gitRoot,
+    allowedRoot: () => windowManager.getGitRoot(),
     onClientMessage: (msg: ClientMessage) => {
       try {
         handleClientMessage(msg);
@@ -605,7 +693,7 @@ async function main(): Promise<void> {
           to: target,
         });
         syncWatcherToActive();
-        updateWindowTitle();
+        windowManager.setTitleForActive();
       }
       broadcastState();
       return;
@@ -647,163 +735,37 @@ async function main(): Promise<void> {
           }
           log("file_list_empty", {});
         }
-        updateWindowTitle();
+        windowManager.setTitleForActive();
       }
       broadcastState();
       return;
     }
   }
 
-  // 7. BrowserWindow を作成
-  // welcome モードでは activePath=null, gitRoot=null となり buildWindowTitle が "mado" を返す。
-  // file mode のみ保存済み bounds を復元する（Welcome は永続化しない仕様）。
-  const knownWindows: Array<{ id: number; title: string }> = [];
-  const initialStateKey = welcomeMode ? null : resolveStateKey(detectedGitRoot);
-  const loadedStore = welcomeMode ? {} : loadWindowStateStore();
-  const savedBounds = initialStateKey
-    ? getBoundsForKey(loadedStore, initialStateKey)
-    : null;
-  const initialBounds: WindowBounds = savedBounds
-    ? clampWithDefaultDisplays(savedBounds)
-    : { ...DEFAULT_BOUNDS };
-  if (savedBounds && initialStateKey) {
-    log("window_state_loaded", {
-      key: initialStateKey,
-      width: initialBounds.width,
-      height: initialBounds.height,
-      x: initialBounds.x,
-      y: initialBounds.y,
-    });
+  // 8. 初期ウィンドウ生成
+  // welcome モードでは getOrCreateWelcomeWindow() を呼び、
+  // file/directory モードでは getOrCreateWindowForFile(activePath) を呼ぶ。
+  // file モードの場合は同時に IPC サーバーが起動される (WindowManager 内 ensureIpcServer)。
+  if (initialWelcomeMode) {
+    windowManager.getOrCreateWelcomeWindow();
+  } else if (activePath !== null) {
+    windowManager.getOrCreateWindowForFile(path.resolve(activePath));
   }
-
-  const win = new BrowserWindow({
-    title: buildWindowTitle({ activePath, gitRoot: detectedGitRoot }),
-    frame: {
-      x: initialBounds.x,
-      y: initialBounds.y,
-      width: initialBounds.width,
-      height: initialBounds.height,
-    },
-    url: "views://mainview/index.html",
-  });
-  // 復元時に maximized だった場合はウィンドウ作成直後に最大化する (Review #4)
-  if (savedBounds?.maximized === true) {
-    try {
-      win.maximize();
-    } catch (err) {
-      log("window_state_maximize_failed", { reason: String(err) });
-    }
-  }
-  knownWindows.push({ id: win.id, title: win.title });
-  log("webview_state_changed", { state: "creating" });
-  if (welcomeMode) {
-    log("welcome_window_opened", { windowId: win.id });
-  }
-
-  /**
-   * welcome → file mode への遷移。最初のファイル追加時に 1 回だけ走る (冪等)。
-   * IPC server はここで初めて起動する (welcome 中はプロジェクト未確定のため listen しない)。
-   * detectedGitRoot も同時に更新するため、以降の updateWindowTitle() が適切なタイトルを出す。
-   */
-  function upgradeToFileMode(firstAbsPath: string): void {
-    const result = computeUpgradeToFileMode({
-      firstAbsPath,
-      welcomeMode,
-      findGitRoot,
-    });
-    if (result.kind === "noop") return;
-    detectedGitRoot = result.detectedGitRoot;
-    gitRoot = result.gitRoot;
-    ipcSocketPath = result.socketPath;
-    log("git_root_detected", {
-      gitRoot,
-      filePath: firstAbsPath,
-      detected: detectedGitRoot !== null,
-    });
-    ipcServer = startIpcServer(ipcSocketPath, (newFilePath) => {
-      addFileToState(newFilePath);
-      try {
-        win.focus();
-      } catch (err) {
-        log("window_focus_failed", { reason: String(err) });
-      }
-    });
-    welcomeMode = false;
-    log("welcome_to_file_transition", { path: firstAbsPath, gitRoot });
-  }
-
-  /**
-   * 現在のアクティブファイル・検出 gitRoot からタイトルを算出してウィンドウに反映する。
-   * active が変化したタイミングと welcome→file 遷移の直後に呼ぶ。
-   * detectedGitRoot は mutable で、welcome→file 遷移時に upgradeToFileMode が書き換える。
-   */
-  function updateWindowTitle(): void {
-    const entry = activeEntry(state);
-    const title = buildWindowTitle({
-      activePath: entry?.absolutePath ?? null,
-      gitRoot: detectedGitRoot,
-    });
-    win.setTitle(title);
-    log("window_title_updated", { title });
-  }
-
-  // 8. DOM 準備完了後の処理（WebSocket 接続を促す。state は client の "ready" で配信）
-  win.webview.on("dom-ready", () => {
-    log("webview_state_changed", { state: "dom-ready" });
-
-    // WebSocket クライアントを起動（ポートを渡す）
-    if (wsServer) {
-      win.webview.executeJavascript(`window.__MADO_WS_CONNECT__(${wsServer.port})`);
-    }
-
-    // T042: 起動時の Wide Layout 状態を WebView に反映する。
-    // executeJavascript は逐次実行されるため、最初の state メッセージで render() が
-    // 走る前に maxWidth が設定され、レイアウトのちらつきが起きない。
-    // did-navigate 経由で WebView module が再評価されてもこのハンドラで再適用される。
-    win.webview.executeJavascript(
-      `window.__MADO_SET_WIDE_LAYOUT__(${preferences.wideLayout})`,
-    );
-
-    // T043: 検索ボックスの aria-label / title を locale に合わせて切り替える。
-    win.webview.executeJavascript(
-      `window.__MADO_SET_LOCALE__(${JSON.stringify(detectLocale())})`,
-    );
-
-    // watcher を起動（既に動いていなければ）
-    if (!watcher) {
-      syncWatcherToActive();
-    }
-  });
-
-  win.webview.on("did-navigate", () => {
-    log("webview_state_changed", { state: "did-navigate" });
-    // ページ再読み込み時は client が再度 ready を送って state が再配信される
-  });
-
-  // 9. host-message の受信
-  //
-  // 生値ログ → Mermaid エラー → エントリ右クリックメニュー要求 の順で呼ぶ。
-  // 各ハンドラは自分の type 以外は早期 return するため共存可能。
-  win.on("host-message", (event: unknown) => {
-    logHostMessageRaw(event);
-    handleMermaidErrorEvent(event);
-    handleEntryContextMenuRequest(event);
-    handleOpenExternalRequest(event);
-  });
 
   /**
    * 絶対パスを state に追加し、必要なら watcher 切替と WebView 再配信を行う。
    * IPC 受信経路とメニュー Open... 経路で共通利用する。
    *
-   * 不変条件: upgradeToFileMode → buildEntry の順序 (gitRoot 確定後に相対パス計算)。
+   * 不変条件: getOrCreateWindowForFile → buildEntry の順序 (gitRoot 確定後に相対パス計算)。
    */
   function addFileToState(newFilePath: string): void {
     try {
-      // welcome モードの場合はここで gitRoot / IPC server を確定させる。
-      // 2 回目以降は no-op (冪等)。
-      upgradeToFileMode(newFilePath);
+      // welcome モードならここで gitRoot / IPC server を確定させる (冪等)。
+      // 既存ウィンドウがあれば same instance を返すだけ。
+      windowManager.getOrCreateWindowForFile(newFilePath);
+      const gitRoot = windowManager.getGitRoot();
       if (gitRoot === null) {
-        // upgradeToFileMode が正しく走れば到達不能だが、型的な保険。
+        // getOrCreateWindowForFile が正しく走れば到達不能だが、型的な保険。
         throw new Error("gitRoot が確定していません");
       }
       const entry = buildEntry(newFilePath, gitRoot);
@@ -829,14 +791,15 @@ async function main(): Promise<void> {
           to: nextActive?.absolutePath ?? "",
         });
         syncWatcherToActive();
-        updateWindowTitle();
+        windowManager.setTitleForActive();
       }
 
       broadcastState();
+      windowManager.activateActive();
 
       // Open Recent 履歴を更新する。addFileToState は IPC / メニュー Open... /
       // welcome→file 遷移など「ユーザーが明示的に開いた」経路で呼ばれるため、
-      // すべてのケースで履歴に積む（directory モード初期ループは別経路で除外。§2.7）。
+      // すべてのケースで履歴に積む（directory モード初期ループは別経路で除外）。
       recentFiles = addRecentFile(entry.absolutePath);
       if (menuCtrl) menuCtrl.rebuild();
 
@@ -852,27 +815,17 @@ async function main(): Promise<void> {
     }
   }
 
-  // 10. IPC サーバー起動（file mode のみ。welcome→file 遷移時は upgradeToFileMode が起動する）
-  if (!welcomeMode && ipcSocketPath !== null) {
-    ipcServer = startIpcServer(ipcSocketPath, (newFilePath) => {
-      addFileToState(newFilePath);
-      try {
-        win.focus();
-      } catch (err) {
-        log("window_focus_failed", { reason: String(err) });
-      }
-    });
-  }
-
-  // 10b. macOS アプリケーションメニューをインストール
+  // 9. macOS アプリケーションメニューをインストール
   //
-  // close イベント時に Window メニューを更新するが、Electrobun 側の close 処理で
-  // BrowserWindowMap から削除される前に rebuild() が走ると閉じたウィンドウが
-  // 一覧に残る恐れがあるため、queueMicrotask で 1 拍遅延させて実行する。
+  // Window メニューは windowManager.listWindows() を起点に動的に組み立てる。
+  // close 時に rebuild() が走るのは onWindowClosed で行われる (queueMicrotask)。
   menuCtrl = installApplicationMenu(ApplicationMenu, {
     openMarkdownFile: (absPath) => addFileToState(absPath),
-    listWindows: (): WindowSummary[] => knownWindows.slice(),
+    listWindows: () => windowManager.listWindows(),
     focusWindowById: (id) => {
+      // 本来は計画 (T049 D3) で `activate()` を使う想定だが、依存している
+      // Electrobun 1.16.0 の BrowserWindow には `activate()` が無いため
+      // `focus()` を呼ぶ。同バージョンの focus() は deprecation 警告も出さない。
       const target = BrowserWindow.getById(id);
       if (target) {
         target.focus();
@@ -881,27 +834,33 @@ async function main(): Promise<void> {
     openFileDialog: (opts) => Utils.openFileDialog(opts),
     // View メニュー: WebView 側の __MADO_ZOOM_* を呼ぶ (T032)。
     // ログは WebView 側 applyZoom が出すため Bun 側では二重記録しない。
-    zoomIn: () => win.webview.executeJavascript("window.__MADO_ZOOM_IN__()"),
-    zoomOut: () => win.webview.executeJavascript("window.__MADO_ZOOM_OUT__()"),
-    zoomReset: () => win.webview.executeJavascript("window.__MADO_ZOOM_RESET__()"),
+    // ウィンドウが無い場合は no-op (メニュー活性化中でも安全に呼べる)。
+    zoomIn: () =>
+      windowManager.getActiveWindow()?.webview.executeJavascript("window.__MADO_ZOOM_IN__()"),
+    zoomOut: () =>
+      windowManager.getActiveWindow()?.webview.executeJavascript("window.__MADO_ZOOM_OUT__()"),
+    zoomReset: () =>
+      windowManager.getActiveWindow()?.webview.executeJavascript("window.__MADO_ZOOM_RESET__()"),
     // View > Wide Layout (T042): preferences.json でグローバル永続化。
     // checked 表示は build 時に isWideLayout() を読むため、toggle 後は menuCtrl.rebuild() が必須。
-    // ※ WebView 側でも applyWideLayout が `console.log` を出す（Zoom と異なり二重出力は意図的：
-    //   Bun 側ログは toggle 操作の監査、WebView 側ログは DOM 反映の事実を別系統で残す）。
     isWideLayout: () => preferences.wideLayout,
     toggleWideLayout: () => {
       preferences = { ...preferences, wideLayout: !preferences.wideLayout };
       savePreferences(preferences);
       log("wide_layout_toggled", { wideLayout: preferences.wideLayout });
-      // ※ boolean 限定。値域を広げる場合は JSON.stringify を介すこと。
-      win.webview.executeJavascript(
-        `window.__MADO_SET_WIDE_LAYOUT__(${preferences.wideLayout})`,
-      );
+      // ウィンドウが無いときは保存とメニュー rebuild のみ。次回ウィンドウ作成時の
+      // dom-ready で __MADO_SET_WIDE_LAYOUT__ が反映される。
+      windowManager
+        .getActiveWindow()
+        ?.webview.executeJavascript(
+          `window.__MADO_SET_WIDE_LAYOUT__(${preferences.wideLayout})`,
+        );
       if (menuCtrl) menuCtrl.rebuild();
     },
     // Edit > Find... (T043): WebView 側の __MADO_SHOW_FIND__ を呼ぶ。
     // ログは WebView 側 showFind が出すため Bun 側では二重記録しない（zoom と同じ判断）。
-    showFind: () => win.webview.executeJavascript("window.__MADO_SHOW_FIND__()"),
+    showFind: () =>
+      windowManager.getActiveWindow()?.webview.executeJavascript("window.__MADO_SHOW_FIND__()"),
     // Open Recent (T041): 履歴はメインプロセス側の `recentFiles` で一元管理する。
     // listRecentFiles はメニュー再構築時に毎回呼ばれるためコピーを返す（変更を漏らさない）。
     listRecentFiles: () => recentFiles.slice(),
@@ -919,8 +878,8 @@ async function main(): Promise<void> {
     fileExists: (p) => existsSync(p),
   });
 
-  // 10b'. 左ペインファイルエントリ用コンテキストメニューをインストール
-  //       (installEntryContextMenu はプロセスあたり 1 回のみ呼ぶ)
+  // 10. 左ペインファイルエントリ用コンテキストメニューをインストール
+  //     (installEntryContextMenu はプロセスあたり 1 回のみ呼ぶ)
   installEntryContextMenu(ContextMenu, {
     copyToClipboard: (text) => Utils.clipboardWriteText(text),
     revealInFinder: (absPath) => Utils.showItemInFolder(absPath),
@@ -928,16 +887,17 @@ async function main(): Promise<void> {
       handleClientMessage({ type: "remove-file", absolutePath: absPath }),
   });
 
-  // 10c. ウィンドウ状態の永続化 (T022)
+  // 11. ウィンドウ状態の永続化 (T022)
   //
   // Welcome モードでは saver を生成しない（仕様：welcome は記憶しない）。
   // file mode、または welcome→file 遷移後に ensureSaver() で遅延生成する。
+  // R3: welcomeMode は WindowManager の内部状態を参照する形に変える。
   let saver: WindowStateSaver | null = null;
 
   function ensureSaver(): WindowStateSaver | null {
     if (saver) return saver;
-    if (welcomeMode) return null;
-    const key = resolveStateKey(detectedGitRoot);
+    if (windowManager.isWelcomeMode()) return null;
+    const key = resolveStateKey(windowManager.getDetectedGitRoot());
     saver = createWindowStateSaver({ key });
     return saver;
   }
@@ -950,14 +910,16 @@ async function main(): Promise<void> {
   }): void {
     const s = ensureSaver();
     if (!s) return;
+    const browserWindow = windowManager.getActiveWindow();
+    if (!browserWindow) return;
     try {
-      const frame = win.getFrame();
+      const frame = browserWindow.getFrame();
       const bounds: WindowBounds = {
         x: Math.round(partial.x ?? frame.x),
         y: Math.round(partial.y ?? frame.y),
         width: Math.round(partial.width ?? frame.width),
         height: Math.round(partial.height ?? frame.height),
-        maximized: win.isMaximized(),
+        maximized: browserWindow.isMaximized(),
       };
       s.schedule(bounds);
     } catch (err) {
@@ -965,38 +927,28 @@ async function main(): Promise<void> {
     }
   }
 
-  win.on("resize", (event) => {
-    handleBoundsChanged(extractBounds(event));
-  });
-  win.on("move", (event) => {
-    handleBoundsChanged(extractBounds(event));
-  });
-
-  // ウィンドウ増減を Window メニューへ反映。
-  // Electrobun 側 close リスナーで BrowserWindowMap から削除された後に
-  // 自前の knownWindows からも削除 → rebuild() の順序を保証するため、
-  // close ハンドラ内は queueMicrotask で 1 拍遅延させて実行する。
-  Electrobun.events.on("close", (event: unknown) => {
-    // 閉じる直前に保留中の bounds を同期 flush
-    if (saver) saver.flush();
-    const closedId = extractClosedWindowId(event);
-    if (closedId !== null) {
-      const idx = knownWindows.findIndex((w) => w.id === closedId);
-      if (idx >= 0) knownWindows.splice(idx, 1);
+  // 12. Dock アイコンクリック (macOS NSApplicationDelegate applicationShouldHandleReopen)
+  //     全ウィンドウ閉じ後に Dock アイコンがクリックされたとき、welcome ウィンドウを開き直す。
+  Electrobun.events.on("reopen", () => {
+    try {
+      log("app_reopened", { hasActive: windowManager.hasActiveWindow() });
+      if (windowManager.hasActiveWindow()) {
+        windowManager.activateActive();
+      } else {
+        windowManager.getOrCreateWelcomeWindow();
+      }
+    } catch (err) {
+      log("app_reopen_failed", { reason: String(err) });
     }
-    queueMicrotask(() => menuCtrl.rebuild());
   });
 
-  // before-quit: アプリ終了前の最終 flush (Review #1 に従い必ず { allow: true } を返す)
+  // before-quit: アプリ終了前の最終 flush。{ allow: true } を返して終了を許可する。
   Electrobun.events.on("before-quit", () => {
     if (saver) saver.flush();
     return { allow: true };
   });
 
-  // 初期ウィンドウ生成直後にも再構築（タイトル反映等のため）
-  queueMicrotask(() => menuCtrl.rebuild());
-
-  // 11. 終了処理
+  // 13. 終了処理
   process.on("beforeExit", () => {
     if (saver) {
       saver.flush();
@@ -1009,9 +961,8 @@ async function main(): Promise<void> {
     if (wsServer) {
       wsServer.stop();
     }
-    if (ipcServer !== null && ipcSocketPath !== null) {
-      stopIpcServer(ipcServer, ipcSocketPath);
-    }
+    // R2: WindowManager.shutdown() が ipcServer 停止 + ソケットファイル削除を行う。
+    windowManager.shutdown();
     const last = activeEntry(state);
     if (last) {
       log("file_closed", { path: last.absolutePath });

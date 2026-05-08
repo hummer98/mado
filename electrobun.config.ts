@@ -7,7 +7,9 @@ export default {
     version: "0.4.2",
   },
   runtime: {
-    exitOnLastWindowClosed: true,
+    // 全ウィンドウ閉じ後も bun を生かして reopen / IPC を受けるため (T049)。
+    // macOS の慣習どおり ⌘Q で明示終了する。
+    exitOnLastWindowClosed: false,
   },
   scripts: {
     // Info.plist に CFBundleDocumentTypes を注入する hook (T046)。
