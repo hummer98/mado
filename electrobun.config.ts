@@ -4,7 +4,7 @@ export default {
   app: {
     name: "mado",
     identifier: "com.ridgeroot.mado",
-    version: "0.4.2",
+    version: "0.4.3",
   },
   runtime: {
     // 全ウィンドウ閉じ後も bun を生かして reopen / IPC を受けるため (T049)。
