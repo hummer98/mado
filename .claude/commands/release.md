@@ -311,6 +311,28 @@ gh run list --workflow=update-tap.yml --limit 1 --json status,conclusion,url \
   -q '.[0]'
 ```
 
+### 9. ローカルの mado を新版に更新
+
+`hummer98/homebrew-mado` の Cask が更新されたら、手元の `/Applications/mado.app`
+も新版に置き換える。リリース直後の動作確認を CLI / Launchpad の両方で行うため。
+これを忘れると CHANGELOG に書いた新機能が「動かない」と錯覚しやすい
+（実際は古いバンドルが起動しているだけ）。
+
+```bash
+brew update
+brew upgrade --cask mado
+
+# version 確認（NEXT_VERSION と一致しているか）
+INSTALLED=$(node -p "require('/Applications/mado.app/Contents/Resources/version.json').version")
+echo "installed: $INSTALLED / expected: $NEXT_VERSION"
+[ "$INSTALLED" = "$NEXT_VERSION" ] || echo "⚠️  version mismatch — tap 反映待ちか手動更新が必要"
+```
+
+更新が取れない場合 (`Already up-to-date` のまま `version.json` が旧版) は
+update-tap workflow が完了してから tap が pull 可能になるまで数十秒〜数分の
+ラグがあるので、30 秒待って再実行する。それでも取れない場合は
+`brew tap hummer98/mado` の cache 状態を疑う。
+
 ## 注意事項
 
 ### 署名・公証について

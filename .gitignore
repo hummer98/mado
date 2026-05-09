@@ -36,3 +36,6 @@ vendor/bundle/
 
 # Claude Code 関連
 .claude/scheduled_tasks.lock
+
+# cmux-team が作る Conductor 用 worktree
+.worktrees/
