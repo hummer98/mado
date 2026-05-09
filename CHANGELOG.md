@@ -6,11 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-05-09
+
+### Added
+- handle Markdown link clicks: open external URLs (http/https/mailto) in the default browser via macOS `open`; append relative `.md` links to the sidebar
+
 ### Changed
-- refactor window lifecycle to support reopening after all windows closed (T049)
+- introduce WindowManager for lifecycle separation; keep the bun process alive after all windows close so that `mado <file>` or Dock click can recreate a window (T049)
 
 ### Fixed
-- focus existing window when a file is delegated via IPC
+- focus existing window when a file is delegated via IPC (T048)
 
 ## [0.4.2] - 2026-05-01
 
